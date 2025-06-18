@@ -4,8 +4,8 @@ const GBC = @import("GBC.zig").GBC;
 
 pub const SM83 = struct {
 
-    regs : Registers,
     Emu  : *GBC,
+    regs : Registers,
 
     pub fn init(parentPtr : *GBC) SM83{
 
@@ -63,7 +63,7 @@ const Registers = struct {
         r.af.setFlagByte(0x80);
         r.af.a.set(0x11);
 
-        r.bc.set(0x0);
+        r.bc.set(0x0000);
         r.de.set(0xFF58);
         r.hl.set(0x000D);
 

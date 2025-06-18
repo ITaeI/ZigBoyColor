@@ -21,6 +21,7 @@ pub const GBC = struct {
 
     // Useful control variables
     quit : bool = false,
+    DmgMode : bool = false,
 
     // Memory allocator
     allocator : std.mem.Allocator = undefined,
