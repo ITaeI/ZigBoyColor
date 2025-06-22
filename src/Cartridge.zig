@@ -226,15 +226,15 @@ const MBC1 = struct {
     pub fn read(self: MBC1,address: u16) u8{
 
         return switch (address) {
-            0...0x3FFF => if (!modeFlag) self.Data.*[address] else self.Data.*[address + (ZeroBank*0x4000)],
-            0x4000...0x7FFF => self.Data.*[address - 0x4000 + (HighBank * 0x4000)],
+            0...0x3FFF => if (!modeFlag) self.Data.*[address] else self.Data.*[@as(u32,address) + @as(u32,ZeroBank)*0x4000],
+            0x4000...0x7FFF => self.Data.*[@as(u32,(address - 0x4000)) + @as(u32,HighBank) * 0x4000],
             0xA000...0xBFFF => blk :{
                 if(!ramEnabled){ 
                     break :blk 0xFF;
                 }
                 
                 if(self.Header.ram_size >= 0x03){
-                    break :blk if(modeFlag) RAM[(address - 0xA000) + currentRamBank * 0x2000] else RAM[address - 0xA000];
+                    break :blk if(modeFlag) RAM[@as(u32,(address - 0xA000)) + @as(u32,currentRamBank) * 0x2000] else RAM[address - 0xA000];
                 }
                 else {
                     break :blk RAM[address - 0xA000];
@@ -266,7 +266,7 @@ const MBC1 = struct {
 
                 if(self.Header.ram_size >= 0x3){
                     if(modeFlag){
-                        RAM[(address - 0xA000) + currentRamBank * 0x2000] = data;
+                        RAM[@as(u32,(address - 0xA000)) + @as(u32,currentRamBank) * 0x2000] = data;
                     }else{
                         RAM[address - 0xA000] = data;
                     }
@@ -322,12 +322,12 @@ const MBC2 = struct {
 
     pub fn read(self : MBC2,address: u16) u8{
         return switch (address) {
-            0x4000...0x7FFF => self.Data.*[(address-0x4000) + (currentRomBank * 0x4000)],
+            0x4000...0x7FFF => self.Data.*[@as(u32,(address-0x4000)) + @as(u32,currentRomBank) * 0x4000],
             0xA000...0xBFFF => blk:{
                 if(!ramEnabled) break :blk 0xFF;
-                break :blk 0xF0 | (RAM[((address - 0xA000)&0x1FF) + (currentRamBank * 0x2000)] & 0xF);
+                break :blk 0xF0 | (RAM[(@as(u32,(address - 0xA000))&0x1FF) + @as(u16,currentRamBank) * 0x2000] & 0xF);
             },
-            else => ROM[address],
+            else => RAM[address],
         };
     }
 
@@ -344,7 +344,8 @@ const MBC2 = struct {
             0xA000...0xBFFF => {
                 if(!ramEnabled) return;
                 RAM[(address-0xA000)&0x1FF] = data; // only half bytes are stored
-            }
+            },
+            else => {},
         }
         // discard since we dont need header data
         _  = self;
@@ -395,7 +396,7 @@ const MBC3 = struct {
     pub fn read(self:MBC3,address: u16) u8{
         return switch (address) {
             0...0x3FFF => self.Data.*[address],
-            0x4000...0x7FFF => self.Data.*[(address-0x4000) + (currentRomBank * 0x4000)],
+            0x4000...0x7FFF => self.Data.*[@as(u32,(address-0x4000)) + @as(u32,currentRomBank) * 0x4000],
             0xA000...0xBFFF => blk:{
                 if(ClockRegisterMapped){
                     if(!latchOccured) break :blk 0xFF;
@@ -410,9 +411,10 @@ const MBC3 = struct {
                 }
                 else {
                     if(!ramEnabled) break :blk 0xFF;
-                    break :blk RAM[(address-0xA000) + (currentRamBank * 0x2000)];
+                    break :blk RAM[@as(u32,(address-0xA000)) + @as(u32,currentRamBank) * 0x2000];
                 }
-            }
+            },
+            else => 0xFF,
         };
     }
 
@@ -466,9 +468,10 @@ const MBC3 = struct {
                 }
                 else{
                     if(!ramEnabled) return;
-                    RAM[(address-0xA000) + (currentRamBank * 0x2000)] = data;
+                    RAM[@as(u32,(address-0xA000)) + @as(u16,currentRamBank) * 0x2000] = data;
                 }
-            }
+            },
+            else => {},
         }
         _ = self;
     }

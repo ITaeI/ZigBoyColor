@@ -3,6 +3,8 @@ const SM83 = @import("SM83.zig").SM83;
 const MMap = @import("MemoryMap.zig").MemoryMap;
 const Cart = @import("Cartridge.zig").Cartridge;
 const PPU = @import("PPU.zig").PPU;
+const Timer  = @import("Timer.zig").Timer;
+const DMA = @import("DMA.zig").DMA;
 
 pub const GBC = struct {
 
@@ -16,12 +18,15 @@ pub const GBC = struct {
     // Here is the Bus/Memory Map
     bus : MMap = undefined,
     // Here is the timer
-
+    timer : Timer = undefined,
     // Here is the APU
 
+    // DMA module
+    dma : DMA = undefined,
     // Useful control variables
     quit : bool = false,
     DmgMode : bool = false,
+    DoubleSpeed : bool = false,
 
     // Memory allocator
     allocator : std.mem.Allocator = undefined,
@@ -29,9 +34,14 @@ pub const GBC = struct {
     pub fn init(self: *GBC) void{
 
         self.cpu = SM83.init(self);
+        // need to setup Opcode Tables
+        self.cpu.setupOpcodeTables();
+
         self.ppu = PPU.init(self);
         self.cart = Cart{.alloc = std.heap.page_allocator};
         self.bus = MMap.init(self);
+        self.timer = Timer.init(self);
+        self.dma = DMA.init(self);
 
     }
 
@@ -53,11 +63,25 @@ pub const GBC = struct {
         self.cart.deinit();
     }
 
-    pub fn cycle() void{
+    pub fn cycle(self: *GBC) void{
 
-        // APU
-        // PPU
-        // DMA 
-        // Timer
+        var i : u8 = 0;
+        while(i < 4) : (i += 1){
+            self.timer.tick();
+
+            // the ppu "Slows to half" in double speed mode
+            // so does the apu (in progress)
+            if(!self.DoubleSpeed)
+            {
+                self.ppu.tick();
+            }
+            else if(i == 1 or i == 3){
+                self.ppu.tick();
+            }
+        }
+        // vram dma (not affected by double speed as it is a single data transfer)
+        self.dma.GeneralPurpose();
+        // oam dma
+        self.dma.oamTick();
     }
 };

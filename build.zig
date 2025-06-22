@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
     Mod.linkLibrary(sdl_lib);
 
     const exe = b.addExecutable(.{
-        .name = "ZigBoyAdvance",
+        .name = "ZigBoyColor",
         .root_module = Mod,
     });
 
