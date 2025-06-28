@@ -503,7 +503,6 @@ const MBC3 = struct {
     }
 
     pub fn reloadSave(self: MBC3 ,filePath : []const u8) !void{
-        
         try reloadsaveFile(filePath, RAM[0..],".sav");
         if(self.HasTimer) try reloadsaveFile(filePath, std.mem.asBytes(&RTC),".rtc");
     }

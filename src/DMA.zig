@@ -34,19 +34,14 @@ pub const DMA = struct {
     }
 
     pub fn write(self : *DMA, address: u16, data : u8)void{
-        std.debug.print("Address : {x}\n", .{address});
-        std.debug.print("Data : {x}\n", .{data});
         switch (address) {
-            0xFF51 => HDMA12 = (HDMA12&0xFF) | (@as(u16,data) << 8),
+            0xFF51 => HDMA12 = (HDMA12&0x80FF) | (@as(u16,data) << 8),
             0xFF52 => HDMA12 = (HDMA12&0xFF00) | @as(u16,data&0xF0),
-            0xFF53 => HDMA34 = (HDMA34&0xFF) | (@as(u16,data) << 8),
+            0xFF53 => HDMA34 = (HDMA34&0x80FF) | (@as(u16,data) << 8),
             0xFF54 => HDMA34 = (HDMA34&0xFF00) | @as(u16,data&0xF0),
             0xFF55 => self.startVRAMTransfer(data),
             else => {},        
         }
-
-        std.debug.print("HMDA 12 {x}\n", .{HDMA12});
-        std.debug.print("HDMA 34 {x}\n", .{HDMA34});
 
     }
 
@@ -124,8 +119,8 @@ pub const DMA = struct {
 };
 
 const VRAM_DMA_Control = packed struct {
-    TransferMode : VRAMTransferMode,
     TransferLength : u7,
+    TransferMode : VRAMTransferMode,
 };
 
 const VRAMTransferMode = enum(u1) {
