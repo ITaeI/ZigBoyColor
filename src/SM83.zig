@@ -17,11 +17,10 @@ pub const SM83 = struct {
 
     dmaWasActive: bool = false,
 
-
     pub fn init(parentPtr : *GBC) SM83{
 
         return SM83{
-            .regs = Registers.init(),
+            .regs = Registers.init(parentPtr),
             .Emu = parentPtr,
         };
     }
@@ -32,7 +31,7 @@ pub const SM83 = struct {
 
             // Fetch Opcode
             var opcode : u8 = self.readMem(self.regs.pc);
-
+            
             // Halt bug causes pc to not increment
             if(self.HaltBug){
                 self.regs.pc -%= 1;
@@ -45,10 +44,18 @@ pub const SM83 = struct {
                 opcode = self.readMem(self.regs.pc);
                 const i = self.OpcodeTableCB[opcode];
                 i.handler(self, i.Op1, i.Op2);
+
+                
             }
             else {
+
+
                 const i = self.OpcodeTable[opcode];
-                i.handler(self, i.Op1, i.Op2);     
+                // std.debug.print("Mnemonic {s}\n", .{i.mnemonic});
+                // std.debug.print("PC : {x}\n", .{self.regs.pc});
+                i.handler(self, i.Op1, i.Op2); 
+
+
             }
         }
         else{
@@ -69,28 +76,28 @@ pub const SM83 = struct {
             self.IMEWaitCount += 1;
             if(self.IMEWaitCount == 2){
                 self.IME = true;
+                self.IMEWait = false;
+                self.IMEWaitCount = 0;
             }
         }
 
         // Then we call the interrupt handler if Ime is true
         if(self.IME){
-            self.IMEWait = false;
-            self.IMEWaitCount = 0;
             // call interrupt here
+            self.InterruptHandler();
         }
 
     }
 
-    pub fn InterruptHandler(self: *SM83) void{
+    fn InterruptHandler(self: *SM83) void{
 
         var IntVector: u16 = 0x40;
         // check leading zeros to find which interrupt to service
-        const zct = @ctz(self.regs.IE.get());
+        const zct: u3 = @truncate(@ctz(self.regs.IE.get()));
         if(zct < 5){
 
-            if(self.regs.IE.getBit(zct) == self.regs.IF.getBit(zct) ){
-
-                // 2 m cycles occur in "NOP"
+            if(self.regs.IE.getBit(zct) == 1 and self.regs.IF.getBit(zct) == 1 ){
+                
                 self.Emu.cycle();
                 self.Emu.cycle();
 
@@ -102,7 +109,7 @@ pub const SM83 = struct {
                 self.writeMem(self.regs.sp.get(), @truncate(self.regs.pc));
                 
                 // 1 last cycle setting new PC value
-                IntVector += (8 * zct);
+                IntVector += (8 * @as(u16,zct));
                 self.regs.pc = IntVector;
                 self.Emu.cycle();
 
@@ -110,6 +117,7 @@ pub const SM83 = struct {
                 self.IME = false;
                 // reset IF flag
                 self.regs.IF.setBit(zct, 0);
+
             }
         }
     }
@@ -117,7 +125,7 @@ pub const SM83 = struct {
     pub fn fetch16bits(self: *SM83) u16 {
         const lo = self.readMem(self.regs.pc);
         const hi = self.readMem(self.regs.pc);
-        return buildAddress(hi, lo);
+        return buildAddress(lo, hi);
     }
 
     pub fn readMem(self: *SM83,address:u16)u8{
@@ -171,7 +179,7 @@ pub const SM83 = struct {
             .{ .handler = DEC_R8, .mnemonic = "DEC E", .Op1 = Op{ .r8 = &c.regs.de.lo } },
             .{ .handler = LD_R8_u8, .mnemonic = "LD E, u8", .Op1 = Op{ .r8 = &c.regs.de.lo } },
             .{ .handler = RRA, .mnemonic = "RRA" },
-            .{ .handler = JR_CC_E, .mnemonic = "JR NZ, e", .Op1 = Op{ .b = !c.regs.CheckStatusFlag(StatusFlag.Z) } },
+            .{ .handler = JR_CC_E, .mnemonic = "JR NZ, e", .Op1 = Op{ .flag = .{.type = StatusFlag.Z, .state = false }} },
             .{ .handler = LD_R16_u16, .mnemonic = "LD HL, u16", .Op1 = Op{ .r16 = &c.regs.hl } },
             .{ .handler = LD_HL_INC_A, .mnemonic = "LD (HL+), A" },
             .{ .handler = INC_R16, .mnemonic = "INC HL", .Op1 = Op{ .r16 = &c.regs.hl } },
@@ -179,7 +187,7 @@ pub const SM83 = struct {
             .{ .handler = DEC_R8, .mnemonic = "DEC H", .Op1 = Op{ .r8 = &c.regs.hl.hi } },
             .{ .handler = LD_R8_u8, .mnemonic = "LD H, u8", .Op1 = Op{ .r8 = &c.regs.hl.hi } },
             .{ .handler = DAA, .mnemonic = "DAA" },
-            .{ .handler = JR_CC_E, .mnemonic = "JR Z, e", .Op1 = Op{ .b = c.regs.CheckStatusFlag(StatusFlag.Z) } },
+            .{ .handler = JR_CC_E, .mnemonic = "JR Z, e", .Op1 = Op{ .flag = .{.type = StatusFlag.Z, .state = true }} },
             .{ .handler = ADD_HL_R16, .mnemonic = "ADD HL, HL", .Op1 = Op{ .r16 = &c.regs.hl } },
             .{ .handler = LD_A_HL_INC, .mnemonic = "LD A, (HL+)" },
             .{ .handler = DEC_R16, .mnemonic = "DEC HL", .Op1 = Op{ .r16 = &c.regs.hl } },
@@ -187,7 +195,7 @@ pub const SM83 = struct {
             .{ .handler = DEC_R8, .mnemonic = "DEC L", .Op1 = Op{ .r8 = &c.regs.hl.lo } },
             .{ .handler = LD_R8_u8, .mnemonic = "LD L, u8", .Op1 = Op{ .r8 = &c.regs.hl.lo } },
             .{ .handler = CPL, .mnemonic = "CPL" },
-            .{ .handler = JR_CC_E, .mnemonic = "JR NC, e", .Op1 = Op{ .b = !c.regs.CheckStatusFlag(StatusFlag.C) } },
+            .{ .handler = JR_CC_E, .mnemonic = "JR NC, e", .Op1 = Op{ .flag = .{.type = StatusFlag.C, .state = false }} },
             .{ .handler = LD_R16_u16, .mnemonic = "LD SP, u16", .Op1 = Op{ .r16 = &c.regs.sp } }, 
             .{ .handler = LD_HL_DEC_A, .mnemonic = "LD (HL-), A" },
             .{ .handler = INC_R16, .mnemonic = "INC SP", .Op1 = Op{ .r16 = &c.regs.sp } },
@@ -195,7 +203,7 @@ pub const SM83 = struct {
             .{ .handler = DEC_HL, .mnemonic = "DEC (HL)" },
             .{ .handler = LD_HL_u8, .mnemonic = "LD (HL), u8" },
             .{ .handler = SCF, .mnemonic = "SCF" },
-            .{ .handler = JR_CC_E, .mnemonic = "JR C, e", .Op1 = Op{ .b = c.regs.CheckStatusFlag(StatusFlag.C) } },
+            .{ .handler = JR_CC_E, .mnemonic = "JR C, e", .Op1 = Op{ .flag = .{.type = StatusFlag.C, .state = true }} },
             .{ .handler = ADD_HL_R16, .mnemonic = "ADD HL, SP", .Op1 = Op{ .r16 = &c.regs.sp } },
             .{ .handler = LD_A_HL_DEC, .mnemonic = "LD A, (HL-)" },
             .{ .handler = DEC_R16, .mnemonic = "DEC SP", .Op1 = Op{ .r16 = &c.regs.sp } },
@@ -331,35 +339,35 @@ pub const SM83 = struct {
             .{ .handler = CP_R8, .mnemonic = "CP L", .Op1 = Op{ .r8 = &c.regs.hl.lo } },
             .{ .handler = CP_HL, .mnemonic = "CP (HL)" },
             .{ .handler = CP_R8, .mnemonic = "CP A", .Op1 = Op{ .r8 = &c.regs.af.a } },
-            .{ .handler = RET_CC, .mnemonic = "RET NZ", .Op1 = Op{ .b = !c.regs.CheckStatusFlag(StatusFlag.Z) } },
+            .{ .handler = RET_CC, .mnemonic = "RET NZ", .Op1 = Op{ .flag = .{.type = StatusFlag.Z, .state = false }} },
             .{ .handler = POP_R16, .mnemonic = "POP BC", .Op1 = Op{ .r16 = &c.regs.bc } },
-            .{ .handler = JP_CC_u16, .mnemonic = "JP NZ, u16", .Op1 = Op{ .b = !c.regs.CheckStatusFlag(StatusFlag.Z) } },
+            .{ .handler = JP_CC_u16, .mnemonic = "JP NZ, u16", .Op1 = Op{ .flag = .{.type = StatusFlag.Z, .state = false }} },
             .{ .handler = JP_u16, .mnemonic = "JP u16" },
-            .{ .handler = CALL_CC_u16, .mnemonic = "CALL NZ, u16", .Op1 = Op{ .b = !c.regs.CheckStatusFlag(StatusFlag.Z) } },
+            .{ .handler = CALL_CC_u16, .mnemonic = "CALL NZ, u16", .Op1 = Op{ .flag = .{.type = StatusFlag.Z, .state = false }} },
             .{ .handler = PUSH_R16, .mnemonic = "PUSH BC", .Op1 = Op{ .r16 = &c.regs.bc } },
             .{ .handler = ADD_u8, .mnemonic = "ADD A, u8" },
             .{ .handler = RST_u8, .mnemonic = "RST 00H", .Op1 = Op{ .bit = 0x00 } },
-            .{ .handler = RET_CC, .mnemonic = "RET Z", .Op1 = Op{ .b = c.regs.CheckStatusFlag(StatusFlag.Z) } },
+            .{ .handler = RET_CC, .mnemonic = "RET Z", .Op1 = Op{ .flag = .{.type = StatusFlag.Z, .state = true }} },
             .{ .handler = RET, .mnemonic = "RET" },
-            .{ .handler = JP_CC_u16, .mnemonic = "JP Z, u16", .Op1 = Op{ .b = c.regs.CheckStatusFlag(StatusFlag.Z) } },
+            .{ .handler = JP_CC_u16, .mnemonic = "JP Z, u16", .Op1 = Op{ .flag = .{.type = StatusFlag.Z, .state = true }} },
             .{ .handler = NOP, .mnemonic = "PREFIX CB" }, // 0xCB
-            .{ .handler = CALL_CC_u16, .mnemonic = "CALL Z, u16", .Op1 = Op{ .b = c.regs.CheckStatusFlag(StatusFlag.Z) } },
+            .{ .handler = CALL_CC_u16, .mnemonic = "CALL Z, u16", .Op1 = Op{ .flag = .{.type = StatusFlag.Z, .state = true }} },
             .{ .handler = CALL_u16, .mnemonic = "CALL u16" },
             .{ .handler = ADC_u8, .mnemonic = "ADC A, u8" },
             .{ .handler = RST_u8, .mnemonic = "RST 08H", .Op1 = Op{ .bit = 0x08 } },
-            .{ .handler = RET_CC, .mnemonic = "RET NC", .Op1 = Op{ .b = !c.regs.CheckStatusFlag(StatusFlag.C) } },
+            .{ .handler = RET_CC, .mnemonic = "RET NC", .Op1 = Op{ .flag = .{.type = StatusFlag.C, .state = false }} },
             .{ .handler = POP_R16, .mnemonic = "POP DE", .Op1 = Op{ .r16 = &c.regs.de } },
-            .{ .handler = JP_CC_u16, .mnemonic = "JP NC, u16", .Op1 = Op{ .b = !c.regs.CheckStatusFlag(StatusFlag.C) } },
+            .{ .handler = JP_CC_u16, .mnemonic = "JP NC, u16", .Op1 = Op{ .flag = .{.type = StatusFlag.C, .state = false }} },
             .{ .handler = NOP, .mnemonic = "NOP" }, // 0xD3 (unofficial/unused)
-            .{ .handler = CALL_CC_u16, .mnemonic = "CALL NC, u16", .Op1 = Op{ .b = !c.regs.CheckStatusFlag(StatusFlag.C) } },
+            .{ .handler = CALL_CC_u16, .mnemonic = "CALL NC, u16", .Op1 = Op{ .flag = .{.type = StatusFlag.C, .state = false }} },
             .{ .handler = PUSH_R16, .mnemonic = "PUSH DE", .Op1 = Op{ .r16 = &c.regs.de } },
             .{ .handler = SUB_u8, .mnemonic = "SUB u8" },
             .{ .handler = RST_u8, .mnemonic = "RST 10H", .Op1 = Op{ .bit = 0x10 } },
-            .{ .handler = RET_CC, .mnemonic = "RET C", .Op1 = Op{ .b = c.regs.CheckStatusFlag(StatusFlag.C) } },
+            .{ .handler = RET_CC, .mnemonic = "RET C", .Op1 = Op{ .flag = .{.type = StatusFlag.C, .state = true }} },
             .{ .handler = RETI, .mnemonic = "RETI" },
-            .{ .handler = JP_CC_u16, .mnemonic = "JP C, u16", .Op1 = Op{ .b = c.regs.CheckStatusFlag(StatusFlag.C) } },
+            .{ .handler = JP_CC_u16, .mnemonic = "JP C, u16", .Op1 = Op{ .flag = .{.type = StatusFlag.C, .state = true }} },
             .{ .handler = NOP, .mnemonic = "NOP" }, // 0xDB (unofficial/unused)
-            .{ .handler = CALL_CC_u16, .mnemonic = "CALL C, u16", .Op1 = Op{ .b = c.regs.CheckStatusFlag(StatusFlag.C) } },
+            .{ .handler = CALL_CC_u16, .mnemonic = "CALL C, u16", .Op1 = Op{ .flag = .{.type = StatusFlag.C, .state = true }} },
             .{ .handler = NOP, .mnemonic = "NOP" }, // 0xDD (unofficial/unused)
             .{ .handler = SBC_u8, .mnemonic = "SBC A, u8" },
             .{ .handler = RST_u8, .mnemonic = "RST 18H", .Op1 = Op{ .bit = 0x18 } },
@@ -706,7 +714,7 @@ const Op = union(enum){
     r8  : *Register8Bit,
     r16 : *DualRegister,
     bit : u8,
-    b   : bool,
+    flag   : struct {type : StatusFlag, state:bool},
 };
 
 
@@ -741,21 +749,44 @@ const Registers = struct {
         };
     }
 
-    pub fn init() Registers{
+    pub fn init(parentPtr : *GBC) Registers{
         var r = Registers{};
         // Lets set initial the values
-        r.af.setFlagByte(0x80);
-        r.af.a.set(0x11);
+            r.af.a.set(0x11);
+            r.af.setFlagByte(0x80);
+            r.bc.lo.set(0x00);
+            r.sp.set(0xFFFE);
+            r.IE.set(0x00);
+            r.IF.set(0xE1);
 
-        r.bc.set(0x0000);
-        r.de.set(0xFF58);
-        r.hl.set(0x000D);
-        r.sp.set(0xFFFE);
+        // compatability mode
+        if(!parentPtr.CGBMode){
+            // if old license code is 1 or old code is 33 and new code is 1
+            const OldLicense:u8 = parentPtr.cart.header.Old_lic_code;
+            const NewLicense = std.mem.trimRight(u8, std.mem.asBytes(&parentPtr.cart.header.New_Licensee_Code), "\x00");
+            if(OldLicense == 0x1 or (OldLicense == 0x33 and std.mem.eql(u8, NewLicense, "01"))){
+               
+                // reg B is the sum of all title bytes
+                const Title : []u8 = std.mem.asBytes(&parentPtr.cart.header.Title);
+                var sum : u8 = 0;
+                for(Title) | bytes|{
+                    sum +%= bytes;
+                }
+                r.bc.hi.set(sum);
+            }
+            else{ // otherwise B is 0
+                r.bc.hi.set(0x00);
+            }
 
-        r.IE.set(0x00);
-        r.IF.set(0xE1);
-
-        // TODO: Check whether we are running in DMG or CGB mode
+            r.de.set(0x0008);
+            const regB : u8 = r.bc.hi.get();
+            if(regB == 0x43 or regB == 0x58) r.hl.set(0x991A) else r.hl.set(0x007C);
+        }
+        else{ // Regular GBC Mode
+            r.bc.hi.set(0x00);
+            r.de.set(0xFF56);
+            r.hl.set(0x000D);
+        }
 
         return r;
     }
@@ -816,13 +847,6 @@ const FlagRegister = struct {
     flags: flagFormat,
     a : Register8Bit,
 
-    const flagFormat = packed struct {
-        padding : u4 = 0x0,
-        C : bool = false,
-        H : bool = false,
-        N : bool = false,
-        Z : bool = false,
-    };
 
     pub fn getFlagByte(self: *FlagRegister)u8{
         return @bitCast(self.flags);
@@ -831,6 +855,14 @@ const FlagRegister = struct {
     pub fn setFlagByte(self: *FlagRegister,v:u8)void{
         self.flags = @bitCast(v);
     }
+};
+
+const flagFormat = packed struct {
+    padding : u4 = 0x0,
+    C : bool = false,
+    H : bool = false,
+    N : bool = false,
+    Z : bool = false,
 };
 
 const StatusFlag = enum {
@@ -1023,7 +1055,7 @@ fn LD_u16_SP(cpu: *SM83, Op1 : Op, Op2 : Op) void
 {
     const nn : u16 = cpu.fetch16bits();
     cpu.writeMem(nn, cpu.regs.sp.lo.get());
-    cpu.writeMem(nn, cpu.regs.sp.hi.get());
+    cpu.writeMem(nn+1, cpu.regs.sp.hi.get());
     _ = Op1;
     _ = Op2;
 }
@@ -1063,9 +1095,9 @@ fn PUSH_R16(cpu: *SM83, Src : Op, Op2 : Op) void
 
 fn POP_AF(cpu: *SM83, Op1 : Op, Op2 : Op) void 
 {
-    cpu.regs.af.a.set(cpu.readMem(cpu.regs.sp.get()) & 0xF0);
+    cpu.regs.af.setFlagByte(cpu.readMem(cpu.regs.sp.get()) & 0xF0);
     cpu.regs.sp.Inc();
-    cpu.regs.af.setFlagByte(cpu.readMem(cpu.regs.sp.get()));
+    cpu.regs.af.a.set(cpu.readMem(cpu.regs.sp.get()));
     cpu.regs.sp.Inc();
     _ = Op1;
     _ = Op2;
@@ -1084,20 +1116,25 @@ fn POP_R16(cpu: *SM83, Dest : Op, Op2 : Op)void
 
 fn LD_HL_SP_E(cpu: *SM83, Op1 : Op, Op2 : Op) void 
 {
-    const e : i16 = cpu.readMem(cpu.regs.pc);
+    const e :i8 = @bitCast(cpu.readMem(cpu.regs.pc));
+    const sp : u16 = cpu.regs.sp.get();
 
-    // for Overflow checking
-    const FullResult = @addWithOverflow(cpu.regs.sp.get(), @as(u16,@bitCast(e)));
-    const HalfResult = @addWithOverflow(@as(u8,@truncate(cpu.regs.sp.get())), @as(u8,@bitCast(@as(i8,@truncate(e)))));
+    const NewE: u16 = if(e<0) @as(u16,@bitCast(@as(i16,e))) else @as(u16,@as(u8,@bitCast(e)));
+
+    const result:u16 = sp +% NewE;
+
+    const FullCarry: bool = ((sp ^ NewE ^ result)&0x100) != 0;
+    const HalfCarry: bool = ((sp ^ NewE ^ result)&0x10) != 0;
+
     
     cpu.regs.SetStatusFlag(StatusFlag.Z, false);
     cpu.regs.SetStatusFlag(StatusFlag.N, false);
-    cpu.regs.SetStatusFlag(StatusFlag.H, HalfResult[1] != 0);
-    cpu.regs.SetStatusFlag(StatusFlag.C, FullResult[1] != 0);
+    cpu.regs.SetStatusFlag(StatusFlag.H, HalfCarry);
+    cpu.regs.SetStatusFlag(StatusFlag.C, FullCarry);
 
     cpu.Emu.cycle();
 
-    cpu.regs.hl.set(FullResult[0]);
+    cpu.regs.hl.set(result);
 
     _ = Op1;
     _ = Op2;
@@ -1326,13 +1363,10 @@ fn CP_R8(cpu: *SM83, Src : Op, Op2 : Op) void
     const FullResult = @subWithOverflow(cpu.regs.af.a.get(), Src.r8.get());
     const HalfResult = @subWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(Src.r8.get())));
 
-    const CarrySub = @subWithOverflow(FullResult[0], @as(u8,@intFromBool(cpu.regs.CheckStatusFlag(StatusFlag.C))));
-    const HalfCarrySub = @subWithOverflow(@as(u4,@truncate(FullResult[0])), @as(u4,@intFromBool(cpu.regs.CheckStatusFlag(StatusFlag.C))));
-
-    cpu.regs.SetStatusFlag(StatusFlag.Z, CarrySub[0] == 0);
+    cpu.regs.SetStatusFlag(StatusFlag.Z, FullResult[0] == 0);
     cpu.regs.SetStatusFlag(StatusFlag.N, true);
-    cpu.regs.SetStatusFlag(StatusFlag.H, HalfResult[1] != 0 or HalfCarrySub[1] != 0 );
-    cpu.regs.SetStatusFlag(StatusFlag.C, FullResult[1] != 0 or CarrySub[1] != 0);
+    cpu.regs.SetStatusFlag(StatusFlag.H, HalfResult[1] != 0);
+    cpu.regs.SetStatusFlag(StatusFlag.C, FullResult[1] != 0);
 
     _ = Op2;
 }
@@ -1343,13 +1377,11 @@ fn CP_HL(cpu: *SM83, Op1 : Op, Op2 : Op) void
     const FullResult = @subWithOverflow(cpu.regs.af.a.get(), n);
     const HalfResult = @subWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(n)));
 
-    const CarrySub = @subWithOverflow(FullResult[0], @as(u8,@intFromBool(cpu.regs.CheckStatusFlag(StatusFlag.C))));
-    const HalfCarrySub = @subWithOverflow(@as(u4,@truncate(FullResult[0])), @as(u4,@intFromBool(cpu.regs.CheckStatusFlag(StatusFlag.C))));
 
-    cpu.regs.SetStatusFlag(StatusFlag.Z, CarrySub[0] == 0);
+    cpu.regs.SetStatusFlag(StatusFlag.Z, FullResult[0] == 0);
     cpu.regs.SetStatusFlag(StatusFlag.N, true);
-    cpu.regs.SetStatusFlag(StatusFlag.H, HalfResult[1] != 0 or HalfCarrySub[1] != 0 );
-    cpu.regs.SetStatusFlag(StatusFlag.C, FullResult[1] != 0 or CarrySub[1] != 0);
+    cpu.regs.SetStatusFlag(StatusFlag.H, HalfResult[1] != 0);
+    cpu.regs.SetStatusFlag(StatusFlag.C, FullResult[1] != 0);
     _ = Op1;
     _ = Op2;
 }
@@ -1360,13 +1392,12 @@ fn CP_u8(cpu: *SM83, Op1 : Op, Op2 : Op) void
     const FullResult = @subWithOverflow(cpu.regs.af.a.get(), n);
     const HalfResult = @subWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(n)));
 
-    const CarrySub = @subWithOverflow(FullResult[0], @as(u8,@intFromBool(cpu.regs.CheckStatusFlag(StatusFlag.C))));
-    const HalfCarrySub = @subWithOverflow(@as(u4,@truncate(FullResult[0])), @as(u4,@intFromBool(cpu.regs.CheckStatusFlag(StatusFlag.C))));
 
-    cpu.regs.SetStatusFlag(StatusFlag.Z, CarrySub[0] == 0);
+    cpu.regs.SetStatusFlag(StatusFlag.Z, FullResult[0] == 0);
     cpu.regs.SetStatusFlag(StatusFlag.N, true);
-    cpu.regs.SetStatusFlag(StatusFlag.H, HalfResult[1] != 0 or HalfCarrySub[1] != 0 );
-    cpu.regs.SetStatusFlag(StatusFlag.C, FullResult[1] != 0 or CarrySub[1] != 0);
+    cpu.regs.SetStatusFlag(StatusFlag.H, HalfResult[1] != 0);
+    cpu.regs.SetStatusFlag(StatusFlag.C, FullResult[1] != 0);
+
     _ = Op1;
     _ = Op2;
 }
@@ -1405,7 +1436,7 @@ fn DEC_R8(cpu: *SM83, Reg : Op, Op2 : Op) void
     Reg.r8.Dec();
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, Reg.r8.get() == 0);
-    cpu.regs.SetStatusFlag(StatusFlag.N, false);
+    cpu.regs.SetStatusFlag(StatusFlag.N, true);
     cpu.regs.SetStatusFlag(StatusFlag.H, HalfCarry[1] != 0 );
 
     _ = Op2;
@@ -1419,7 +1450,7 @@ fn DEC_HL(cpu: *SM83, Op1 : Op, Op2 : Op) void
     const HalfCarry = @subWithOverflow(@as(u4,@truncate(n)), @as(u4,1));
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
-    cpu.regs.SetStatusFlag(StatusFlag.N, false);
+    cpu.regs.SetStatusFlag(StatusFlag.N, true);
     cpu.regs.SetStatusFlag(StatusFlag.H, HalfCarry[1] != 0 );
 
     cpu.writeMem(cpu.regs.hl.get(), result);
@@ -1476,7 +1507,7 @@ fn OR_R8(cpu: *SM83, Src : Op, Op2 : Op) void
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
     cpu.regs.SetStatusFlag(StatusFlag.N, false);
-    cpu.regs.SetStatusFlag(StatusFlag.H, true);
+    cpu.regs.SetStatusFlag(StatusFlag.H, false);
     cpu.regs.SetStatusFlag(StatusFlag.C, false);
 
     cpu.regs.af.a.set(result);
@@ -1491,7 +1522,7 @@ fn OR_HL(cpu: *SM83, Op1 : Op, Op2 : Op) void
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
     cpu.regs.SetStatusFlag(StatusFlag.N, false);
-    cpu.regs.SetStatusFlag(StatusFlag.H, true);
+    cpu.regs.SetStatusFlag(StatusFlag.H, false);
     cpu.regs.SetStatusFlag(StatusFlag.C, false);
 
     cpu.regs.af.a.set(result);
@@ -1506,7 +1537,7 @@ fn OR_u8(cpu: *SM83, Op1 : Op, Op2 : Op) void
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
     cpu.regs.SetStatusFlag(StatusFlag.N, false);
-    cpu.regs.SetStatusFlag(StatusFlag.H, true);
+    cpu.regs.SetStatusFlag(StatusFlag.H, false);
     cpu.regs.SetStatusFlag(StatusFlag.C, false);
 
     cpu.regs.af.a.set(result);
@@ -1520,7 +1551,7 @@ fn XOR_R8(cpu: *SM83, Src : Op, Op2 : Op) void
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
     cpu.regs.SetStatusFlag(StatusFlag.N, false);
-    cpu.regs.SetStatusFlag(StatusFlag.H, true);
+    cpu.regs.SetStatusFlag(StatusFlag.H, false);
     cpu.regs.SetStatusFlag(StatusFlag.C, false);
 
     cpu.regs.af.a.set(result);
@@ -1535,7 +1566,7 @@ fn XOR_HL(cpu: *SM83, Op1 : Op, Op2 : Op) void
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
     cpu.regs.SetStatusFlag(StatusFlag.N, false);
-    cpu.regs.SetStatusFlag(StatusFlag.H, true);
+    cpu.regs.SetStatusFlag(StatusFlag.H, false);
     cpu.regs.SetStatusFlag(StatusFlag.C, false);
 
     cpu.regs.af.a.set(result);
@@ -1550,7 +1581,7 @@ fn XOR_u8(cpu: *SM83, Op1 : Op, Op2 : Op) void
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
     cpu.regs.SetStatusFlag(StatusFlag.N, false);
-    cpu.regs.SetStatusFlag(StatusFlag.H, true);
+    cpu.regs.SetStatusFlag(StatusFlag.H, false);
     cpu.regs.SetStatusFlag(StatusFlag.C, false);
 
     cpu.regs.af.a.set(result);
@@ -1627,7 +1658,7 @@ fn INC_R16(cpu: *SM83, Reg16 : Op, Op2 : Op) void
 
 fn DEC_R16(cpu: *SM83, Reg16 : Op, Op2 : Op) void 
 {
-    Reg16.r16.Inc();
+    Reg16.r16.Dec();
     //Requires an extra cycle
     cpu.Emu.cycle();
 
@@ -1637,10 +1668,10 @@ fn DEC_R16(cpu: *SM83, Reg16 : Op, Op2 : Op) void
 fn ADD_HL_R16(cpu: *SM83, Reg16 : Op, Op2 : Op) void 
 {
     const FullCarry = @addWithOverflow(cpu.regs.hl.get(), Reg16.r16.get());
-    const HalfCarry = @addWithOverflow(@as(u8,@truncate(cpu.regs.hl.get())), @as(u8,@truncate(Reg16.r16.get())));
+    const HalfCarry = @addWithOverflow(@as(u12,@truncate(cpu.regs.hl.get())), @as(u12,@truncate(Reg16.r16.get())));
     
     
-    cpu.regs.SetStatusFlag(StatusFlag.N, true);
+    cpu.regs.SetStatusFlag(StatusFlag.N, false);
     cpu.regs.SetStatusFlag(StatusFlag.H, HalfCarry[1] != 0);
     cpu.regs.SetStatusFlag(StatusFlag.C, FullCarry[1] != 0);
     
@@ -1654,24 +1685,29 @@ fn ADD_HL_R16(cpu: *SM83, Reg16 : Op, Op2 : Op) void
 
 fn ADD_SP_E(cpu: *SM83, Op1 : Op, Op2 : Op) void 
 {
-     const e : i16 = cpu.readMem(cpu.regs.pc);
+    const e :i8 = @bitCast(cpu.readMem(cpu.regs.pc));
+    const sp : u16 = cpu.regs.sp.get();
 
-    // for Overflow checking
-    const FullCarry = @addWithOverflow(cpu.regs.sp.get(), @as(u16,@bitCast(e)));
-    const HalfCarry = @addWithOverflow(@as(u8,@truncate(cpu.regs.sp.get())), @as(u8,@bitCast(@as(i8,@truncate(e)))));
+    const NewE: u16 = if(e<0) @as(u16,@bitCast(@as(i16,e))) else @as(u16,@as(u8,@bitCast(e)));
 
+    const result:u16 = sp +% NewE;
+
+    const FullCarry: bool = ((sp ^ NewE ^ result)&0x100) != 0;
+    const HalfCarry: bool = ((sp ^ NewE ^ result)&0x10) != 0;
+    
     cpu.regs.SetStatusFlag(StatusFlag.Z, false);
     cpu.regs.SetStatusFlag(StatusFlag.N, false);
-    cpu.regs.SetStatusFlag(StatusFlag.H, HalfCarry[1] != 0);
-    cpu.regs.SetStatusFlag(StatusFlag.C, FullCarry[1] != 0);
+    cpu.regs.SetStatusFlag(StatusFlag.H, HalfCarry);
+    cpu.regs.SetStatusFlag(StatusFlag.C, FullCarry);
 
     // two extra cycles
     cpu.Emu.cycle();
     cpu.Emu.cycle();
 
-    cpu.regs.sp.set(FullCarry[0]);
+    cpu.regs.sp.set(result);
     _ = Op1;
     _ = Op2;
+
 }
 
 fn RLCA(cpu: *SM83, Op1 : Op, Op2 : Op) void 
@@ -1727,7 +1763,7 @@ fn RRA(cpu: *SM83, Op1 : Op, Op2 : Op) void
     const b0 = @as(u8,cpu.regs.af.a.getBit(0));
     const RotateRight: u8 = (@as(u8,@intFromBool(cpu.regs.CheckStatusFlag(StatusFlag.C))) << 7) | (cpu.regs.af.a.get() >> 1);
 
-    cpu.regs.SetStatusFlag(StatusFlag.Z, RotateRight == 0);
+    cpu.regs.SetStatusFlag(StatusFlag.Z, false);
     cpu.regs.SetStatusFlag(StatusFlag.N, false);
     cpu.regs.SetStatusFlag(StatusFlag.H, false);
     cpu.regs.SetStatusFlag(StatusFlag.C, b0 != 0);
@@ -2001,7 +2037,7 @@ fn BIT_B_R8(cpu: *SM83, Src : Op, bit : Op) void
 fn BIT_B_HL(cpu: *SM83, bit : Op, Op2 : Op) void 
 {
     const n : u8 = cpu.readMem(cpu.regs.hl.get());
-    cpu.regs.SetStatusFlag(StatusFlag.Z, n >> ((@as(u3,@truncate(bit.bit))) & 1) == 0);
+    cpu.regs.SetStatusFlag(StatusFlag.Z, (n >> (@as(u3,@truncate(bit.bit))))&1 == 0);
     cpu.regs.SetStatusFlag(StatusFlag.N, false);
     cpu.regs.SetStatusFlag(StatusFlag.H, true);
 
@@ -2061,7 +2097,7 @@ fn JP_CC_u16(cpu: *SM83, CC : Op, Op2 : Op) void
 {
     const address : u16 = cpu.fetch16bits();
 
-    if (CC.b)
+    if (cpu.regs.CheckStatusFlag(CC.flag.type) == CC.flag.state)
     {
         cpu.regs.pc = address;
 
@@ -2073,10 +2109,11 @@ fn JP_CC_u16(cpu: *SM83, CC : Op, Op2 : Op) void
 }
 
 fn JR_E(cpu: *SM83, Op1 : Op, Op2 : Op) void 
-{
-    
-    const e: i16 = @as(i8,@bitCast(cpu.readMem(cpu.regs.pc)));
-    cpu.regs.pc +%=  @as(u16,@bitCast(e));
+{   
+    const e:u16  = @bitCast(@as(i16,@intCast(@as(i8,@bitCast(cpu.readMem(cpu.regs.pc))))));
+
+    cpu.regs.pc +%=  e;
+
     //Requires an extra cycle
     cpu.Emu.cycle();
     _ = Op1;
@@ -2085,11 +2122,13 @@ fn JR_E(cpu: *SM83, Op1 : Op, Op2 : Op) void
 
 fn JR_CC_E(cpu: *SM83, CC : Op, Op2 : Op) void 
 {
-    const e: i16 = @as(i8,@bitCast(cpu.readMem(cpu.regs.pc)));
+    const e:u16  = @bitCast(@as(i16,@intCast(@as(i8,@bitCast(cpu.readMem(cpu.regs.pc))))));
 
-    if(CC.b)
+    if(cpu.regs.CheckStatusFlag(CC.flag.type) == CC.flag.state)
     {
-        cpu.regs.pc +%=  @as(u16,@bitCast(e));
+
+        cpu.regs.pc +%=  e;
+
         //Requires an extra cycle
         cpu.Emu.cycle();
     }
@@ -2115,7 +2154,7 @@ fn CALL_u16(cpu: *SM83, Op1 : Op, Op2 : Op) void
 fn CALL_CC_u16(cpu: *SM83, CC : Op, Op2 : Op) void 
 {
     const address : u16 = cpu.fetch16bits();
-    if (CC.b)
+    if (cpu.regs.CheckStatusFlag(CC.flag.type) == CC.flag.state)
     {
         cpu.regs.sp.Dec();
         cpu.writeMem(cpu.regs.sp.get(),@truncate(cpu.regs.pc >> 8));
@@ -2144,7 +2183,7 @@ fn RET(cpu: *SM83, Op1 : Op, Op2 : Op) void
 
 fn RET_CC(cpu: *SM83, CC : Op, Op2 : Op) void 
 {
-    if(CC.b)
+    if(cpu.regs.CheckStatusFlag(CC.flag.type) == CC.flag.state)
     {
         const lsb: u8 = cpu.readMem(cpu.regs.sp.get());
         cpu.regs.sp.Inc();
@@ -2169,7 +2208,9 @@ fn RETI(cpu: *SM83, Op1 : Op, Op2 : Op) void
     cpu.regs.pc = buildAddress(lsb, msb);
     cpu.Emu.cycle();
 
-    // TODO: Interrupts enablingIME = true;
+    cpu.IMEWait = true;
+    cpu.IMEWaitCount = 0;
+
     _ = Op1;
     _ = Op2;
 }
@@ -2216,8 +2257,13 @@ fn HALT(cpu: *SM83, Op1 : Op, Op2 : Op) void
 
 fn STOP(cpu: *SM83, Op1 : Op, Op2 : Op) void 
 {
-    // Nothing
-    _ = cpu;
+    // if double speed is set and armed then we swap to a different speed
+    if(cpu.Emu.DoubleSpeed.Armed)
+    {
+        cpu.Emu.DoubleSpeed.Active = !cpu.Emu.DoubleSpeed.Active;
+        cpu.Emu.DoubleSpeed.Armed = false;
+    } 
+        
     _ = Op1;
     _ = Op2;
 }
@@ -2234,6 +2280,7 @@ fn DI(cpu: *SM83, Op1 : Op, Op2 : Op) void
 fn EI(cpu: *SM83, Op1 : Op, Op2 : Op) void
 {
     cpu.IMEWait = true;
+    cpu.IMEWaitCount = 0;
     _ = Op1;
     _ = Op2;
 }

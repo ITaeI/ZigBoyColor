@@ -42,13 +42,16 @@ pub const MemoryMap =struct {
     }
 
     pub fn read(self : *MemoryMap, address : u16) u8 {
-
+        
         return switch (address) {
             0...0x7FFF => self.cart.read(address),
-            0x8000...0x9FFF => self.ppu.vram.read(address),
+            0x8000...0x9FFF => blk:{
+                if(self.ppu.mode == .DrawingPixels) break :blk 0xFF;
+                break :blk self.ppu.vram.read(address);
+            },
             0xC000...0xDFFF => self.wram.read(address),
             0xFE00...0xFE9F => blk :{
-                if(self.dma.OAMTransferInProgress) return 0xFF;
+                if(self.dma.OAMTransferInProgress or self.ppu.mode == .OAMScan or self.ppu.mode == .DrawingPixels) break :blk 0xFF;
                 break :blk self.ppu.oam.read(address);
             }, // DMA
             0xFEA0...0xFEFF => 0xFF, // unusable
@@ -63,11 +66,14 @@ pub const MemoryMap =struct {
 
         switch (address) {
             0...0x7FFF =>self.cart.write(address,data),
-            0x8000...0x9FFF =>self.ppu.vram.write(address,data),
+            0x8000...0x9FFF =>{
+                if(self.ppu.mode == .DrawingPixels) return;
+                self.ppu.vram.write(address,data);
+            },
             0xA000...0xBFFF =>self.cart.write(address, data),
             0xC000...0xDFFF => self.wram.write(address, data),
             0xFE00...0xFE9F => {
-                if(self.dma.OAMTransferInProgress) return;
+                if(self.dma.OAMTransferInProgress or self.ppu.mode == .OAMScan or self.ppu.mode == .DrawingPixels) return;
                 self.ppu.oam.write(address-0xFE00, data);
             }, // DMA
             0xFEA0...0xFEFF => {}, // unusable
@@ -80,16 +86,16 @@ pub const MemoryMap =struct {
 };
 
 const WRAM = struct {
-    FixedBank : [0x2000]u8 = .{0} ** 0x2000,
-    CGBBanks : [7][0x1000]u8 = .{.{0} ** 0x1000} ** 7,
+    FixedBank : [0x1000]u8 = .{0} ** 0x1000,
+    CGBBanks : [8][0x1000]u8 = .{.{0} ** 0x1000} ** 8,
     CurrentBank : u8 = 1,
 
     pub fn read(self: *WRAM, address : u16) u8{
-        return if(address <= 0xCFFF ) self.FixedBank[address & 0x1FFF] else self.CGBBanks[self.CurrentBank][address&0xFFF];
+        return if(address <= 0xCFFF ) self.FixedBank[address & 0x0FFF] else self.CGBBanks[self.CurrentBank][address&0xFFF];
     }
 
     pub fn write(self : *WRAM, address : u16, data : u8) void {
-        if(address <= 0xCFFF) self.FixedBank[address&0x1FFF] = data else self.CGBBanks[self.CurrentBank][address&0xFFF] = data;
+        if(address <= 0xCFFF) self.FixedBank[address&0x0FFF] = data else self.CGBBanks[self.CurrentBank][address&0xFFF] = data;
     }
 };
 
@@ -130,10 +136,14 @@ const IO = struct {
             0xFF10...0xFF26 => 0xFF, // APU
             0xFF30...0xFF3F => 0xFF, // WaveRAM
             0xFF40...0xFF4B => self.ppu.read(address),
+            0xFF4D => @bitCast(self.Emu.DoubleSpeed),
             0xFF4F => 0xFE | (self.ppu.vram.CurrentBank&1),
             0xFF50 => 0xFF, // Bootrom Disable?
             0xFF55 => self.dma.read(),
-            0xFF68...0xFF6B => 0xFF, // CGB Color Palettes
+            0xFF68...0xFF6B => blk:{
+                if(self.ppu.mode == .DrawingPixels) break :blk 0xFF;
+                break :blk self.ppu.read(address);
+            }, // CGB Color Palettes
             0xFF70 => self.Emu.bus.wram.CurrentBank, 
             else => 0xFF,
         };
@@ -149,38 +159,39 @@ const IO = struct {
             0xFF10...0xFF26 => {}, // APU
             0xFF30...0xFF3F => {}, // WaveRAM
             0xFF40...0xFF4B => self.ppu.write(address, data),
-            0xFF4C => {}, // cpu mode select - set at the beginning
-            0xFF4D => {}, // Key 1
+            0xFF4D => self.Emu.DoubleSpeed.Armed = (data & 1) == 1,
             0xFF4F => self.ppu.vram.CurrentBank = data&1,
             0xFF50 => {}, // Bootrom Disable?
             0xFF51...0xFF55 => self.dma.write(address, data),
-            0xFF68...0xFF6B => {}, // CGB Color Palettes
+            0xFF68...0xFF6B => {
+                if(self.ppu.mode == .DrawingPixels) return;
+                self.ppu.write(address, data);
+            }, // CGB Color Palettes
             0xFF6C => {}, // object priority mode - set at the beginning
-            0xFF70 => self.Emu.bus.wram.CurrentBank = if(data & 7 == 0 ) 1 else data & 7, 
+            0xFF70 => self.Emu.bus.wram.CurrentBank = if(data & 7 == 0 ) 1 else (data & 7 ), 
             else => {},
         }
     }
 };
 
 const JoyPad = struct {
-    var state : u8 = 0xFF;
+    state : u8 = 0xFF,
 
-    var selectDpad : bool = false;
-    var selectButtons : bool = false;
+    selectDpad : bool = false,
+    selectButtons : bool = false,
 
     pub fn init() JoyPad{
         return JoyPad{};
     }
 
     pub fn read(self : *JoyPad) u8{
-        if(selectDpad){
-            return @as(u8,(1<<4)) | (state&0xF);
+        if(self.selectDpad){
+            return @as(u8,(1<<4)) | (self.state&0xF);
         }
-        else if(selectButtons){
-            return @as(u8,(2<<4)) | (state>>4);
+        else if(self.selectButtons){
+            return @as(u8,(2<<4)) | (self.state>>4);
         }
         
-        _ = self;
         return 0xCF;
     }
 
@@ -188,34 +199,31 @@ const JoyPad = struct {
 
         if((data >> 4 & 0x1) == 0x00) // Check if dpad was selected
         {
-            selectDpad = true;
-            selectButtons = false;
+            self.selectDpad = true;
+            self.selectButtons = false;
             
         }
         else if((data >> 5 & 0x1) == 0x00) // Check if buttons were selected
         {
-            selectButtons = true;
-            selectDpad = false;
+            self.selectButtons = true;
+            self.selectDpad = false;
         }
 
-        _ = self;
     }
 
-    pub fn pressKey(self : JoyPad,comptime bit : u8)void{
-        state &= ~(@as(u8,(1)) << bit);
+    pub fn pressKey(self : *JoyPad,comptime bit : u3)void{
+        self.state &= ~(@as(u8,(1)) << bit);
 
-        if(bit <= 3 and selectDpad){
+        if(bit <= 3 and self.selectDpad){
             // set IF joypad interrupt IF Bit
         }
-        else if(bit >= 4 and selectButtons){
+        else if(bit >= 4 and self.selectButtons){
             //also set joypad interrupt IF bit
         }
 
-        _ = self;
     }
 
-    pub fn releaseKey(self : JoyPad, comptime bit : u8)void{
-        state |= (@as(u8,(1)) << bit);
-        _ = self;
+    pub fn releaseKey(self : *JoyPad, comptime bit : u3)void{
+        self.state |= (@as(u8,(1)) << bit);
     }
 };

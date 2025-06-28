@@ -1,8 +1,11 @@
 const std = @import("std");
+const GBC = @import("GBC.zig").GBC;
 
 
 pub const Cartridge = struct {
 
+    // GBC pointer 
+    GBC : *GBC,
     // File name : Useful for creating save files
     filePath : []const u8 = undefined,
     // Header : Gives us useful data on what rom is entered
@@ -35,6 +38,7 @@ pub const Cartridge = struct {
         const stat = try file.stat();
         self.romData = try file.readToEndAlloc(self.alloc, stat.size);
 
+        errdefer self.alloc.free(self.romData);
         // Extract Our header information
         self.header = @ptrCast(@alignCast(&self.romData[0x100]));
 
@@ -55,6 +59,11 @@ pub const Cartridge = struct {
             0x13 => MBC{.MBC3 = MBC3{.Header = self.header,.Data = &self.romData,.HasBattery = true}},
             else => return error.UnsupportedMemoryBankController,
         };
+        // Check to see if the CGB Flag is set (Last byte of Title is CGB flag)
+        if(self.romData[0x143] == 0x80 or self.romData[0x143]  == 0xC0){
+            self.GBC.CGBMode = true;
+        }
+
 
         // Check if our chipset has battery buffered ram
         // reload save if it does
@@ -85,19 +94,23 @@ pub const Cartridge = struct {
     pub fn write(self : *Cartridge, address: u16, data : u8) void{
         self.mbc.write(address, data);
     }
+
+    pub fn TimerTick(self : *Cartridge) void{
+        self.mbc.tick();
+    }
 };
 
 const Header = packed struct(u640) {
     entry           : u32,
     nintendo_logo   : u384,
-    Title           : u128,
-    Licensee_Code   : u16,
+    Title           : u128, // the last byte of this is the cgb flag
+    New_Licensee_Code   : u16,
     sgb_flag        : u8,
     cart_type       : u8,
     rom_size        : u8,
     ram_size        : u8,
     dest_code       : u8,
-    lic_code        : u8,
+    Old_lic_code        : u8,
     version         : u8,
     checksum        : u8,
     global_checksum : u16,
@@ -143,21 +156,26 @@ const MBC = union(enum){
         };
     }
 
+    fn tick(self: *MBC) void {
+        return switch (self.*) {
+            .MBC3 => |mbc| mbc.tick(),
+            else => {},
+        };
+    }
+
 };
 
-fn changeFileType(allocator: std.mem.Allocator, fileIn: []const u8) ![]const u8 {
+fn changeFileType(allocator: std.mem.Allocator, fileIn: []const u8, extension: []const u8) ![]const u8 {
 
     const GBneedle = ".gb";
     const GBCneedle = ".gbc";
-
-    const saveFormat = ".sav";
 
     const StringBuffer = try std.mem.replaceOwned(
     u8, 
     allocator, 
     fileIn, 
     if (std.mem.endsWith(u8, fileIn,GBCneedle)) GBCneedle else GBneedle, 
-    saveFormat
+    extension
     ); 
 
 
@@ -196,12 +214,12 @@ const ROM = struct {
 
     pub fn save(self: ROM ,filePath : []const u8) !void{
         _= self;
-        try saveFile(filePath, RAM[0..]);
+        try saveFile(filePath, RAM[0..],"sav");
     }
 
     pub fn reloadSave(self: ROM ,filePath : []const u8) !void{
         _= self;
-        try reloadsaveFile(filePath, RAM[0..]);
+        try reloadsaveFile(filePath, RAM[0..],"sav");
     }
 };
 
@@ -224,6 +242,8 @@ const MBC1 = struct {
     var ramEnabled : bool = false;
 
     pub fn read(self: MBC1,address: u16) u8{
+
+        self.calculateBanks();
 
         return switch (address) {
             0...0x3FFF => if (!modeFlag) self.Data.*[address] else self.Data.*[@as(u32,address) + @as(u32,ZeroBank)*0x4000],
@@ -293,18 +313,18 @@ const MBC1 = struct {
                 HighBank = (currentRomBank & 0b10011111) | ((currentRamBank & 0x3) << 5);
                 ZeroBank = (currentRamBank & 0x3) << 5;
             },
-            else => currentRomBank,
+            else => HighBank = currentRomBank,
         }
     }
 
     pub fn save(self: MBC1 ,filePath : []const u8) !void{
         _= self;
-        try saveFile(filePath, RAM[0..]);
+        try saveFile(filePath, RAM[0..],".sav");
     }
 
     pub fn reloadSave(self: MBC1 ,filePath : []const u8) !void{
         _= self;
-        try reloadsaveFile(filePath, RAM[0..]);
+        try reloadsaveFile(filePath, RAM[0..],".sav");
     }
 };
 
@@ -353,12 +373,12 @@ const MBC2 = struct {
 
     pub fn save(self: MBC2 ,filePath : []const u8) !void{
         _= self;
-        try saveFile(filePath, RAM[0..]);
+        try saveFile(filePath, RAM[0..],".sav");
     }
 
     pub fn reloadSave(self: MBC2 ,filePath : []const u8) !void{
         _= self;
-        try reloadsaveFile(filePath, RAM[0..]);
+        try reloadsaveFile(filePath, RAM[0..],"sav");
     }
 };
 
@@ -383,7 +403,7 @@ const MBC3 = struct {
     var RTC = RTC_Regs{};
     var RTCLatched = RTC_Regs{};
 
-    var prevInput: u8 = undefined;
+    var prevInput: u8 = 20;
 
     const RTC_Regs = struct {
         s : u8 = 0,
@@ -406,7 +426,7 @@ const MBC3 = struct {
                         0xA => 0b11100000 | RTCLatched.h,
                         0xB => RTCLatched.DL,
                         0xC => 0b00111110 | RTCLatched.DH,
-                        else => unreachable, // TODO: most likely can just return rom data
+                        else => unreachable,
                     };
                 }
                 else {
@@ -477,23 +497,51 @@ const MBC3 = struct {
     }
 
     pub fn save(self: MBC3 ,filePath : []const u8) !void{
-        _= self;
-        try saveFile(filePath, RAM[0..]);
+
+        try saveFile(filePath, RAM[0..],".sav");
+        if(self.HasTimer) try saveFile(filePath, std.mem.asBytes(&RTC),".rtc");
     }
 
     pub fn reloadSave(self: MBC3 ,filePath : []const u8) !void{
-        _= self;
-        try reloadsaveFile(filePath, RAM[0..]);
+        
+        try reloadsaveFile(filePath, RAM[0..],".sav");
+        if(self.HasTimer) try reloadsaveFile(filePath, std.mem.asBytes(&RTC),".rtc");
+    }
+
+    pub fn tick(self : *MBC3) void{
+        _ = self;
+
+        RTC.s +%= 1;
+        if(RTC.s == 60)
+        {
+            RTC.s = 0;
+            RTC.m+%=1;
+            if(RTC.m == 60)
+            {
+                RTC.m = 0;
+                RTC.h+%=1;
+                if(RTC.h == 24)
+                {
+                    RTC.DL+%=1;
+                    RTC.h = 0;
+            
+                    if(RTC.DL == 0x00)
+                    {
+                        RTC.DH ^= (1<<7);
+                    }
+                }
+            }
+        }
     }
 };
 
-fn saveFile(filePath: []const u8, ramSlice : []u8) !void{
+fn saveFile(filePath: []const u8, ramSlice : []u8, extension: []const u8) !void{
 
     var buffer: [256]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
 
-    const saveFilePath = try changeFileType(allocator,filePath);
+    const saveFilePath = try changeFileType(allocator,filePath, extension);
     defer allocator.free(saveFilePath);
 
     var file = std.fs.createFileAbsolute(saveFilePath,.{.read = true})
@@ -511,13 +559,13 @@ fn saveFile(filePath: []const u8, ramSlice : []u8) !void{
     _ = try file.writeAll(ramSlice);
 }
 
-fn reloadsaveFile(filePath: []const u8, ramSlice : []u8) !void{
+fn reloadsaveFile(filePath: []const u8, ramSlice : []u8, extension : []const u8) !void{
 
     var buffer: [256]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
 
-    const saveFilePath = try changeFileType(allocator,filePath);
+    const saveFilePath = try changeFileType(allocator,filePath,extension);
     defer allocator.free(saveFilePath);
 
     const file = try std.fs.openFileAbsolute(saveFilePath, .{ .mode = .read_only });
@@ -554,8 +602,10 @@ test "File Save"{
 
 test "Load Rom" {
 
+    var zbc = GBC{};
+
     const alloc = std.testing.allocator;
-    var cart = Cartridge{.alloc = alloc};
+    var cart = Cartridge{.GBC = &zbc,.alloc = alloc};
 
 
     try cart.load("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Legend of Zelda, The - Link's Awakening (U) (V1.2) [!].gb");
@@ -586,4 +636,21 @@ test "Read and Write"{
     const out = cart.read(0x0000);
 
     try std.testing.expect(out == 0xFF);
+}
+
+test "CGB Flag"{
+    var gbc = GBC{};
+    
+    const alloc = std.testing.allocator;
+    var cart = Cartridge{.GBC = &gbc,.alloc = alloc};
+
+    try cart.load("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Pokemon - Silver Version (UE) [C][!].gbc");
+    defer alloc.free(cart.romData);
+
+    std.debug.print("Title: {x}\n", .{cart.header.Title >> 120});
+    std.debug.print("CGB Flag {x}", .{cart.romData[0x143]});
+
+    // Use a CGB Rom to check for the flag
+    try std.testing.expect(cart.header.Title >> 120 == 0x80 or cart.header.Title >> 120 == 0xC0);
+
 }

@@ -1,10 +1,10 @@
 const std = @import("std");
-const GBC = @import("GBC.zig").GBC;
+const GUI = @import("GUI.zig").GUI;
 
 pub fn main() !void {
-    var ZigBoyColor = GBC{};
-    ZigBoyColor.init();
-    try ZigBoyColor.Run(" ");
+    var gui = try GUI.init("ZigBoyColor", 640, 576);
+    try gui.Run();
+    gui.deinit();
 }
 
 

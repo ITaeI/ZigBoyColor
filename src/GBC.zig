@@ -24,39 +24,40 @@ pub const GBC = struct {
     // DMA module
     dma : DMA = undefined,
     // Useful control variables
-    quit : bool = false,
-    DmgMode : bool = false,
-    DoubleSpeed : bool = false,
+    FrameFinished : bool = false,
+    CGBMode : bool = false,
 
-    // Memory allocator
-    allocator : std.mem.Allocator = undefined,
+    // Double speed variables
+    DoubleSpeed : KEY1 = @bitCast(@as(u8,0x7E)),
 
-    pub fn init(self: *GBC) void{
+    pub fn init(self: *GBC, Rom: []const u8) !void{
+
+        self.FrameFinished = false;
+        self.CGBMode = false;
+
+        // Double speed variables
+        self.DoubleSpeed = @bitCast(@as(u8,0x7E));
+
+        // Here we Initalize the Cartridge and load the rom
+        self.cart = Cart{.GBC = self,.alloc = std.heap.page_allocator};
+        try self.cart.load(Rom);
 
         self.cpu = SM83.init(self);
         // need to setup Opcode Tables
         self.cpu.setupOpcodeTables();
 
         self.ppu = PPU.init(self);
-        self.cart = Cart{.alloc = std.heap.page_allocator};
-        self.bus = MMap.init(self);
         self.timer = Timer.init(self);
         self.dma = DMA.init(self);
-
+        self.bus = MMap.init(self);
     }
 
-    pub fn Run(self: *GBC, Rom: []const u8) !void {
-
-        // Here we load the cartridge
-        try self.cart.load(Rom);
+    pub fn Run(self: *GBC) void {
 
         // This is where the cpu will be stepping
-        while(!self.quit){
+        while(!self.FrameFinished){
             self.cpu.step(); 
         }
-
-        // Free any memory allocated to the heap
-        self.deinit();
     }
 
     pub fn deinit(self: *GBC)void{
@@ -64,14 +65,14 @@ pub const GBC = struct {
     }
 
     pub fn cycle(self: *GBC) void{
-
+        
         var i : u8 = 0;
         while(i < 4) : (i += 1){
             self.timer.tick();
 
             // the ppu "Slows to half" in double speed mode
             // so does the apu (in progress)
-            if(!self.DoubleSpeed)
+            if(!self.DoubleSpeed.Active)
             {
                 self.ppu.tick();
             }
@@ -84,4 +85,10 @@ pub const GBC = struct {
         // oam dma
         self.dma.oamTick();
     }
+};
+
+const KEY1 = packed struct {
+    Armed : bool,
+    padding : u6,
+    Active : bool,
 };

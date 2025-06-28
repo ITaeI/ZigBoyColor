@@ -7,7 +7,7 @@ const OAM = @import("PPU.zig").OAM;
 
 pub const DMA = struct {
 
-    bus : *MMap,
+    Emu : *GBC,
     vram : *VRAM,
     oam  : *OAM,
 
@@ -27,14 +27,15 @@ pub const DMA = struct {
         HDMA5 = @bitCast(@as(u8,0xFF));
 
         return DMA{
-            .bus = &parentPtr.bus,
+            .Emu  = parentPtr,
             .vram = &parentPtr.ppu.vram,
             .oam = &parentPtr.ppu.oam,
         };
     }
 
     pub fn write(self : *DMA, address: u16, data : u8)void{
-
+        std.debug.print("Address : {x}\n", .{address});
+        std.debug.print("Data : {x}\n", .{data});
         switch (address) {
             0xFF51 => HDMA12 = (HDMA12&0xFF) | (@as(u16,data) << 8),
             0xFF52 => HDMA12 = (HDMA12&0xFF00) | @as(u16,data&0xF0),
@@ -43,6 +44,9 @@ pub const DMA = struct {
             0xFF55 => self.startVRAMTransfer(data),
             else => {},        
         }
+
+        std.debug.print("HMDA 12 {x}\n", .{HDMA12});
+        std.debug.print("HDMA 34 {x}\n", .{HDMA34});
 
     }
 
@@ -74,8 +78,8 @@ pub const DMA = struct {
         
         if(!self.OAMTransferInProgress) return;
 
-        const oamAddress = (oamStartAddress << 8) | oamCurrentIndex;
-        self.oam.write(oamCurrentIndex, self.bus.read(oamAddress));
+        const oamAddress:u16 = (oamStartAddress << 8) | oamCurrentIndex;
+        self.oam.write(oamCurrentIndex, self.Emu.bus.read(oamAddress));
         oamCurrentIndex +%= 1;
 
         if(oamCurrentIndex > 0x9F){
@@ -89,7 +93,7 @@ pub const DMA = struct {
 
         var i:u16 = 0;
         while(i < 0x10) : (i +=1){
-            const Src: u8 = self.bus.read(HDMA12+i);
+            const Src: u8 = self.Emu.bus.read(HDMA12+i);
             self.vram.write(HDMA34+i, Src);
         }
 
@@ -109,8 +113,8 @@ pub const DMA = struct {
         if(!self.VRAMTransferInProgress or !(HDMA5.TransferMode == .GeneralPurpose)) return;
         
         var i:u16 = 0;
-        while(1 < ((@as(u16,HDMA5.TransferLength) + 1) * 0x10)) : (i+=1){
-            const Src : u8 = self.bus.read(HDMA12+i);
+        while(i < ((@as(u16,HDMA5.TransferLength) + 1) * 0x10)) : (i+=1){
+            const Src : u8 = self.Emu.bus.read(HDMA12+i);
             self.vram.write(HDMA34+i, Src);
         }
 
