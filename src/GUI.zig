@@ -43,9 +43,11 @@ pub const GUI = struct {
         self.gbc = &ZigBoyColor;
 
         //try self.gbc.?.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Legend of Zelda, The - Link's Awakening (U) (V1.2) [!].gb");
-        //try self.gbc.?.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/mem_timing.gb");
+        //try self.gbc.?.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Pokemon Red (UE) [S][!].gb");
         //try self.gbc.?.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Pokemon - Silver Version (UE) [C][!].gbc");
-        try self.gbc.?.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Pokemon - Crystal Version (USA, Europe) (Rev A).gbc");
+        //try self.gbc.?.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Pokemon - Crystal Version (USA, Europe) (Rev A).gbc");
+        //try self.gbc.?.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/mem_timing.gb");
+        try self.gbc.?.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/interrupt_time.gb");
         
         while(!quit){
             

@@ -142,7 +142,7 @@ pub const PPU = struct {
         }
     }
 
-    /// TODO: Only call this every 8 pixels
+
     fn DrawScanline(self: *PPU)void{
 
         const LY:u8 = self.regs.ly.get();
@@ -156,7 +156,8 @@ pub const PPU = struct {
         var BGAttributeCache : [20]BGMapAtrributes = undefined;
         // Here we will do a frist pass for only the background pixels
         var X : u8 = 0;
-        while(X < 160): (X += 8){
+        var TileX : u8 = 0;
+        while(X < 160): (X += 8-TileX){
             // Set up what maps and tile data to look at
             var tileMap : u16 = 0x9800;
             var tileData : u16 = 0x9000;
@@ -208,25 +209,28 @@ pub const PPU = struct {
 
             const BGPallete = self.pmem.grabPalette(if(self.Emu.CGBMode) BG_Attr.ColorPalette else 0, true); 
         
-            var bit:u3 = 0;
+            TileX = x&7;
+
+            var bit:u3 = @truncate(TileX);
             while(true){
 
                 const BGLoBit :u8 = (BGLo >> if(BG_Attr.XFlip and self.Emu.CGBMode) bit else 7-bit) & 1;
                 const BGHiBit :u8 = (BGHi >> if(BG_Attr.XFlip and self.Emu.CGBMode) bit else 7-bit) & 1;
                 const BGindex : u8 = (BGHiBit << 1) | BGLoBit;
 
-                // used for sprites later on
-                BGindexCache[X+bit] = BGindex;
+                // If we Out of bound screen finished
+                if((X + bit) > 159) break;
 
+                // used for sprites later on
+                BGindexCache[X+bit - TileX] = BGindex;
                 // Lets set The bit initially to BG color
-                self.screen[X+@as(u8,bit)][LY] = BGPallete[BGindex];
+                self.screen[X+bit - TileX][LY] = BGPallete[BGindex];
 
                 if(bit == 7) break;
                 bit +%= 1;
             }
         }
 
-        
         var X2 : i32 = - 8; // this allows us to see sprites that are halfway off screen
         var Sprite: OAMEntry = undefined;
         while(X2 < 160) : (X2 += 1){
@@ -445,6 +449,7 @@ pub const PPU = struct {
     }
 
     pub fn write(self : *PPU, address: u16,data: u8)void{
+
         switch (address) {
             0xFF40 => self.regs.lcdc = @bitCast(data),
             0xFF41 => self.regs.stat = @bitCast((@as(u8,@bitCast(self.regs.stat)) & 7) | (data & 0xF8)),

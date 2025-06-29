@@ -62,7 +62,7 @@ pub const Cartridge = struct {
             else => return error.UnsupportedMemoryBankController,
         };
         // Check to see if the CGB Flag is set (Last byte of Title is CGB flag)
-        if(self.romData[0x143]  == 0xC0){
+        if(self.romData[0x143]  == 0x80 or self.romData[0x143]  == 0xC0){
             self.GBC.CGBMode = true;
         }
 
@@ -486,15 +486,14 @@ const MBC3 = struct {
     pub fn save(self: *MBC3 ,filePath : []const u8) !void{
 
         try saveFile(filePath, self.RAM[0..],".sav");
-        if(self.HasTimer) try saveFile(filePath, std.mem.asBytes(&self.RTC),".rtc");
-
+        if(self.HasTimer) try saveFile(filePath, std.mem.asBytes(&self.RTCLatched),".rtc");
     }
 
     pub fn reloadSave(self: *MBC3 ,filePath : []const u8) !void{
 
         try reloadsaveFile(filePath, self.RAM[0..],".sav");
-        if(self.HasTimer) try reloadsaveFile(filePath, std.mem.asBytes(&self.RTC),".rtc");
-
+        if(self.HasTimer) try reloadsaveFile(filePath, std.mem.asBytes(&self.RTCLatched),".rtc");
+        self.RTC = self.RTCLatched;
     }
 
     pub fn tick(self : *MBC3) void{

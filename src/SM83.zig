@@ -58,7 +58,7 @@ pub const SM83 = struct {
         }
         else{
             self.Emu.cycle();
-            if((self.regs.IE.get() & self.regs.IF.get()) != 0){
+            if((self.regs.IE.get() & self.regs.IF.get())&0x1F != 0){
                 self.isHalted = false;
 
 
@@ -90,11 +90,11 @@ pub const SM83 = struct {
 
         var IntVector: u16 = 0x40;
         // check leading zeros to find which interrupt to service
-        const zct: u3 = @truncate(@ctz(self.regs.IE.get()));
+        const zct: u3 = @truncate(@ctz(self.regs.IF.get())); // TODO: Why does IF work on some games and IE works on others
         if(zct < 5){
-
             if(self.regs.IE.getBit(zct) == 1 and self.regs.IF.getBit(zct) == 1 ){
                 
+                self.isHalted = false;
                 self.Emu.cycle();
                 self.Emu.cycle();
 
@@ -112,6 +112,9 @@ pub const SM83 = struct {
 
                 // reset ime flag
                 self.IME = false;
+                self.IMEWait = false;
+                self.IMEWaitCount = 0;
+
                 // reset IF flag
                 self.regs.IF.setBit(zct, 0);
 
@@ -2203,11 +2206,9 @@ fn RETI(cpu: *SM83, _ : Op, _ : Op) void
     cpu.regs.pc = buildAddress(lsb, msb);
     cpu.Emu.cycle();
 
-    cpu.IMEWait = true;
+    cpu.IME = true;
+    cpu.IMEWait = false;
     cpu.IMEWaitCount = 0;
-
-    
-    
 }
 
 fn RST_u8(cpu: *SM83, n : Op, _ : Op) void 
@@ -2229,11 +2230,11 @@ fn HALT(cpu: *SM83, _ : Op, _ : Op) void
 {
     if (cpu.IME)
     {
-        // already wakes up and calls the interrupt normally
+        cpu.isHalted = true;
     }
     else
     {
-        if((cpu.regs.IE.get() & cpu.regs.IF.get()) != 0)
+        if((cpu.regs.IE.get() & cpu.regs.IF.get())&0x1F != 0)
         {
             cpu.HaltBug = true;
         }
@@ -2260,7 +2261,6 @@ fn STOP(cpu: *SM83, _ : Op, _ : Op) void
     } 
         
     
-    
 }
 
 fn DI(cpu: *SM83, _ : Op, _ : Op) void 
@@ -2283,9 +2283,6 @@ fn EI(cpu: *SM83, _ : Op, _ : Op) void
 fn NOP(_: *SM83, _ : Op, _ : Op) void
 {
     //nothing
-    
-    
-    
 }
 
 

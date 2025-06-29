@@ -49,16 +49,18 @@ pub const MemoryMap =struct {
                 if(self.ppu.mode == .DrawingPixels) break :blk 0xFF;
                 break :blk self.ppu.vram.read(address);
             },
+            0xA000...0xBFFF => self.cart.read(address),
             0xC000...0xDFFF => self.wram.read(address),
+            // Echo RAM 0xE000 - 0xFDFF
             0xFE00...0xFE9F => blk :{
                 if(self.dma.OAMTransferInProgress or self.ppu.mode == .OAMScan or self.ppu.mode == .DrawingPixels) break :blk 0xFF;
                 break :blk self.ppu.oam.read(address);
             }, // DMA
-            0xFEA0...0xFEFF => 0xFF, // unusable
+            0xFEA0...0xFEFF => 0, // unusable
             0xFF00...0xFF7F => self.io.read(address), // IO
             0xFF80...0xFFFE => self.hram[address - 0xFF80], // High Ram
             0xFFFF => self.cpu.regs.IE.get(), // IE register
-            else => 0xFF,
+            else => 0,
         };
     }
 
@@ -72,15 +74,16 @@ pub const MemoryMap =struct {
             },
             0xA000...0xBFFF =>self.cart.write(address, data),
             0xC000...0xDFFF => self.wram.write(address, data),
+            // Echo RAM 0xE000 - 0xFDFF
             0xFE00...0xFE9F => {
                 if(self.dma.OAMTransferInProgress or self.ppu.mode == .OAMScan or self.ppu.mode == .DrawingPixels) return;
                 self.ppu.oam.write(address-0xFE00, data);
             }, // DMA
-            0xFEA0...0xFEFF => {}, // unusable
+            0xFEA0...0xFEFF => return, // unusable
             0xFF00...0xFF7F => self.io.write(address, data), // IO
             0xFF80...0xFFFE => self.hram[address - 0xFF80] = data, // High Ram
             0xFFFF =>self.cpu.regs.IE.set(data), // IE register
-            else => {},
+            else => return,
         }
     }
 };
@@ -150,26 +153,27 @@ const IO = struct {
     }
 
     pub fn write(self : *IO, address : u16,data : u8)void{
-            switch (address) {
+
+        switch (address) {
             0xFF00 => self.joypad.write(data),
             0xFF01 => self.serialData[0] = data,
             0xFF02 => self.serialData[1] = data,
             0xFF04...0xFF07 => self.timer.write(address, data), //timer
             0xFF0F =>self.cpu.regs.IF.set(data), // IF reg from cpu
-            0xFF10...0xFF26 => {}, // APU
-            0xFF30...0xFF3F => {}, // WaveRAM
+            0xFF10...0xFF26 => return, // APU
+            0xFF30...0xFF3F => return, // WaveRAM
             0xFF40...0xFF4B => self.ppu.write(address, data),
             0xFF4D => self.Emu.DoubleSpeed.Armed = (data & 1) == 1,
             0xFF4F => self.ppu.vram.CurrentBank = data&1,
-            0xFF50 => {}, // Bootrom Disable?
+            0xFF50 => return, // Bootrom Disable?
             0xFF51...0xFF55 => self.dma.write(address, data),
             0xFF68...0xFF6B => {
                 if(self.ppu.mode == .DrawingPixels) return;
                 self.ppu.write(address, data);
             }, // CGB Color Palettes
-            0xFF6C => {}, // object priority mode - set at the beginning
+            0xFF6C => return, // object priority mode - set at the beginning
             0xFF70 => self.Emu.bus.wram.CurrentBank = if(data & 7 == 0 ) 1 else (data & 7 ), 
-            else => {},
+            else => return,
         }
     }
 };
