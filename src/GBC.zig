@@ -30,6 +30,7 @@ pub const GBC = struct {
     // Double speed variables
     DoubleSpeed : KEY1 = @bitCast(@as(u8,0x7E)),
 
+    ticks : u64 = 0,
     pub fn init(self: *GBC, Rom: []const u8) !void{
 
         self.FrameFinished = false;
@@ -79,11 +80,22 @@ pub const GBC = struct {
             else if(i == 1 or i == 3){
                 self.ppu.tick();
             }
+
+            self.ticks += 1;
         }
         // vram dma (not affected by double speed as it is a single data transfer)
         self.dma.GeneralPurpose();
         // oam dma
         self.dma.oamTick();
+
+        if(self.DoubleSpeed.Active and self.ticks >= 4194304*2 ){
+            self.cart.TimerTick();
+            self.ticks = 0;
+        }
+        else if(self.ticks >= 4194304){
+            self.cart.TimerTick();
+            self.ticks = 0;
+        }
     }
 };
 

@@ -38,12 +38,15 @@ pub const GUI = struct {
 
     // This Function Runs te GUI and controlls the GBC
     pub fn Run(self : *GUI) !void{
-        var ZigBoyColor = GBC{};
 
+        var ZigBoyColor = GBC{};
         self.gbc = &ZigBoyColor;
 
+        //try self.gbc.?.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Legend of Zelda, The - Link's Awakening (U) (V1.2) [!].gb");
+        //try self.gbc.?.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/mem_timing.gb");
+        //try self.gbc.?.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Pokemon - Silver Version (UE) [C][!].gbc");
         try self.gbc.?.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Pokemon - Crystal Version (USA, Europe) (Rev A).gbc");
-
+        
         while(!quit){
             
             if(self.gbc) |ZBC|{
@@ -57,7 +60,7 @@ pub const GUI = struct {
 
             self.poll();
         }
-
+        self.deinit();
     }
 
     fn UpdateScreen(self : *GUI)void{

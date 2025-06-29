@@ -120,7 +120,7 @@ const IO = struct {
             .cart = &parentPtr.cart,
             .ppu = &parentPtr.ppu,
             .timer = &parentPtr.timer,
-            .joypad = JoyPad.init(),
+            .joypad = JoyPad.init(parentPtr),
             .dma = &parentPtr.dma,
         };
     }
@@ -175,13 +175,19 @@ const IO = struct {
 };
 
 const JoyPad = struct {
+    // IF Access
+
+    cpu: *SM83,
+
     state : u8 = 0xFF,
 
     selectDpad : bool = false,
     selectButtons : bool = false,
 
-    pub fn init() JoyPad{
-        return JoyPad{};
+    pub fn init(parentPtr : *GBC) JoyPad{
+        return JoyPad{
+            .cpu = &parentPtr.cpu,
+        };
     }
 
     pub fn read(self : *JoyPad) u8{
@@ -215,10 +221,10 @@ const JoyPad = struct {
         self.state &= ~(@as(u8,(1)) << bit);
 
         if(bit <= 3 and self.selectDpad){
-            // set IF joypad interrupt IF Bit
+            self.cpu.regs.IF.setBit(4, 1);
         }
         else if(bit >= 4 and self.selectButtons){
-            //also set joypad interrupt IF bit
+            self.cpu.regs.IF.setBit(4, 1);
         }
 
     }

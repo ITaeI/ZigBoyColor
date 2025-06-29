@@ -102,7 +102,7 @@ pub const PPU = struct {
                         self.Emu.cpu.regs.IF.setBit(0, 1);
 
                         if(self.regs.stat.Mode1Int){
-                        self.Emu.cpu.regs.IF.setBit(1, 1);
+                            self.Emu.cpu.regs.IF.setBit(1, 1);
                         }
                     }
                     else{
@@ -133,6 +133,9 @@ pub const PPU = struct {
                             self.Emu.cpu.regs.IF.setBit(1, 1);
                         }
 
+                    }
+                    else{
+                        self.compareLY_LYC();
                     }
                 }
             },
@@ -173,7 +176,14 @@ pub const PPU = struct {
             var y:u8 = 0;
             var x:u8 = X;
 
-            if(WindowTile) {x -%= WX; y = (LY -% WY)&255;} else {x +%= scx; y = scy +% LY;}
+            if(WindowTile) {
+                x -%= WX; 
+                y = (LY -% WY)&255;
+
+            } else {
+                x +%= scx; 
+                y = scy +% LY;
+            }
 
             // Now that we have our coords we can grab out tile index  and attributes
             const Tile_Attr_Address : u16 = @as(u16,tileMap-0x8000) + (@as(u16,y/8)*32) + (@as(u16,x/8));
@@ -415,7 +425,7 @@ pub const PPU = struct {
 
         return switch (address) {
             0xFF40 => @bitCast(self.regs.lcdc),
-            0xFF41 => @bitCast(self.regs.stat),
+            0xFF41 => (@bitCast(self.regs.stat)),
             0xFF42 => self.regs.scy.get(),
             0xFF43 => self.regs.scx.get(),
             0xFF44 => self.regs.ly.get(),
@@ -437,10 +447,10 @@ pub const PPU = struct {
     pub fn write(self : *PPU, address: u16,data: u8)void{
         switch (address) {
             0xFF40 => self.regs.lcdc = @bitCast(data),
-            0xFF41 => self.regs.stat = @bitCast((@as(u8,@bitCast(self.regs.stat)) & 3) | (data & 0xFC)),
+            0xFF41 => self.regs.stat = @bitCast((@as(u8,@bitCast(self.regs.stat)) & 7) | (data & 0xF8)),
             0xFF42 => self.regs.scy.set(data),
             0xFF43 => self.regs.scx.set(data),
-            0xFF44 => self.regs.ly.set(data),
+            // 0xFF44 is read only
             0xFF45 => self.regs.lyc.set(data),
             0xFF46 => {
                 if(self.Emu.dma.OAMTransferInProgress) return;
@@ -448,9 +458,21 @@ pub const PPU = struct {
                 self.regs.dma.set(data);
                 self.Emu.dma.StartOAMTransfer(data);
             },
-            0xFF47 => self.regs.bgp.set(data),
-            0xFF48 => self.regs.obp0.set(data),
-            0xFF49 => self.regs.obp1.set(data),
+            0xFF47 => {
+                self.regs.bgp.set(data);
+                if(self.Emu.CGBMode) return;
+                self.pmem.updateDMGPalette(data,1);
+            },
+            0xFF48 => {
+                self.regs.obp0.set(data);
+                if(self.Emu.CGBMode) return;
+                self.pmem.updateDMGPalette(data,2);
+            },
+            0xFF49 => {
+                self.regs.obp1.set(data);
+                if(self.Emu.CGBMode) return;
+                self.pmem.updateDMGPalette(data,3);
+            },
             0xFF4A => self.regs.wy.set(data),
             0xFF4B => self.regs.wx.set(data),
             0xFF68 => self.pmem.BCPS = @bitCast(data), 
@@ -585,6 +607,16 @@ const PaletteMemory = struct {
     BCPS : AddressFormat = @bitCast(@as(u8,0x00)),
     OCPS : AddressFormat = @bitCast(@as(u8,0x00)),
 
+    // DMG Colors
+    const DMGPallete : [8]u8 = .{
+        0xFF, 0xFF,
+        0xB5, 0x56,
+        0x29, 0x25,
+        //0b11100111, 0b10011000,
+        0x00, 0x00,
+    };
+
+
     pub fn readOBJ(self : *PaletteMemory)u8 {
         return self.OBJPRAM[self.OCPS.Address&0x3F];
     }
@@ -616,6 +648,44 @@ const PaletteMemory = struct {
         }
         return Out;
     }
+
+    /// input goes BGP OBJ0 OBJ1
+    pub fn updateDMGPalette(self : *PaletteMemory, dmgPalette:u8, i : u2) void{
+        
+        
+        const dmgArray: [4]u2 = .{
+            @intCast((dmgPalette >> 0) & 0b11),
+            @intCast((dmgPalette >> 2) & 0b11),
+            @intCast((dmgPalette >> 4) & 0b11),
+            @intCast((dmgPalette >> 6) & 0b11),
+        };
+        //const dmgArray : [4]u2 = @bitCast(dmgPalette);
+        switch (i) {
+            1 => {
+                for(dmgArray) |color|{
+                    const offset = @as(u8,color)*2;
+                    self.BGPRAM[offset] = DMGPallete[offset];
+                    self.BGPRAM[offset+1] = DMGPallete[offset+1];
+                }
+            },
+            2 =>{
+                for(dmgArray) |color|{
+                    const offset = @as(u8,color)*2;
+                    self.OBJPRAM[offset] = DMGPallete[offset];
+                    self.OBJPRAM[offset+1] = DMGPallete[offset+1];
+                }
+            },
+            3 =>{
+                for(dmgArray) |color|{
+                    const offset = @as(u8,color)*2;
+                    self.OBJPRAM[offset + 8] = DMGPallete[offset];
+                    self.OBJPRAM[offset + 9] = DMGPallete[offset+1];
+                }
+            },
+            else => unreachable,
+        }
+    }
+
 
     const AddressFormat = packed struct {
         Address : u6,

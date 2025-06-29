@@ -34,6 +34,8 @@ pub const DMA = struct {
     }
 
     pub fn write(self : *DMA, address: u16, data : u8)void{
+
+        if(!self.Emu.CGBMode) return;
         switch (address) {
             0xFF51 => HDMA12 = (HDMA12&0x80FF) | (@as(u16,data) << 8),
             0xFF52 => HDMA12 = (HDMA12&0xFF00) | @as(u16,data&0xF0),
@@ -46,6 +48,7 @@ pub const DMA = struct {
     }
 
     pub fn read(self : *DMA)u8{
+        if(!self.Emu.CGBMode) return 0xFF;
         const active : u8 = @as(u8,@intFromBool(self.VRAMTransferInProgress)) << 7;
         return ((~active) & 0x80) | @as(u8,@bitCast(HDMA5));
     }
@@ -84,7 +87,7 @@ pub const DMA = struct {
     }
 
     pub fn Hblank(self: *DMA)void{
-        if(!self.VRAMTransferInProgress or !(HDMA5.TransferMode == .Hblank)) return;
+        if(!self.VRAMTransferInProgress or !(HDMA5.TransferMode == .Hblank) or !self.Emu.CGBMode) return;
 
         var i:u16 = 0;
         while(i < 0x10) : (i +=1){
@@ -105,7 +108,7 @@ pub const DMA = struct {
     }
 
     pub fn GeneralPurpose(self: *DMA)void{
-        if(!self.VRAMTransferInProgress or !(HDMA5.TransferMode == .GeneralPurpose)) return;
+        if(!self.VRAMTransferInProgress or !(HDMA5.TransferMode == .GeneralPurpose) or !self.Emu.CGBMode) return;
         
         var i:u16 = 0;
         while(i < ((@as(u16,HDMA5.TransferLength) + 1) * 0x10)) : (i+=1){
