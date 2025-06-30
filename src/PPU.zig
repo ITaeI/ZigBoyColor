@@ -164,7 +164,7 @@ pub const PPU = struct {
             var WindowTile : bool = false;  
             if(lcdc.WindowEnable){
 
-                if(LY >= WY and X >= WX) {
+                if(LY >= WY and X+7 >= self.regs.wx.get()) {
                     WindowTile = true;
                     if(lcdc.WindowTileMap) tileMap = 0x9C00;
                 }
@@ -288,142 +288,6 @@ pub const PPU = struct {
         }
     }
 
-    fn drawPixel(self : *PPU, X : u8)void{
-
-
-        const LY:u8 = self.regs.ly.get();
-        const WY:u8 = self.regs.wy.get();
-        const WX:u8 = self.regs.wx.get() -% 7;
-        const scx:u8 = self.regs.scx.get();
-        const scy:u8 = self.regs.scy.get();
-
-        // Set up what maps and tile data to look at
-        var tileMap : u16 = 0x9800;
-        var tileData : u16 = 0x9000;
-
-        var WindowTile : bool = false;
-
-        const lcdc = self.regs.lcdc;
-
-        if(lcdc.WindowEnable){
-
-            if(LY >= WY and X >= WX) {
-                WindowTile = true;
-                if(lcdc.WindowTileMap) tileMap = 0x9C00;
-            }
-        }
-
-        if(!WindowTile and lcdc.BGtileMap) tileMap = 0x9C00;
-        if(lcdc.BGWinTileData) tileData = 0x8000;
-
-
-        // initalize our Y and X position
-        var y:u8 = 0;
-        var x:u8 = X;
-
-        if(WindowTile) {x -%= WX; y = (LY -% WY)&255;} else {x +%= scx; y = scy +% LY;}
-
-        // Now that we have our coords we can grab out tile index  and attributes
-        const Tile_Attr_Address : u16 = @as(u16,tileMap-0x8000) + (@as(u16,y/8)*32) + (@as(u16,x/8));
-        
-        const BG_Attr : BGMapAtrributes = @bitCast(self.vram.Banks[1][Tile_Attr_Address]); 
-        const tileIndex: u8 = self.vram.Banks[0][Tile_Attr_Address];
-        
-        const tileOffset: u16 = if (tileData == 0x8000)
-            @as(u16, tileIndex ) * 16 // unsigned
-        else
-            @bitCast(@as(i16, @as(i8, @bitCast(tileIndex))) * 16); // signed, preserve sign when used as offset
-
-        // Calculate yOffset with or without flip
-        const yOffset: u16 = if(BG_Attr.Yflip and self.Emu.CGBMode) (7-(y&7))*2 else (y&7)*2;
-        // Lastly calculate final address using tile datat tileoffset and yoffset
-        const BG_Address : u16 = @as(u16,tileData - 0x8000) +% tileOffset +% yOffset;
-
-        const BGLo: u8 = self.vram.Banks[if(self.Emu.CGBMode) BG_Attr.Bank else 0][BG_Address];
-        const BGHi: u8 = self.vram.Banks[if(self.Emu.CGBMode) BG_Attr.Bank else 0][BG_Address + 1];
-
-
-        // we only need one pixel at the moment which depends on the current X position
-        // and we can use the Xflip attribute to determine  how to shift it
-        const BGLoBit :u8 = (BGLo >> if(BG_Attr.XFlip and self.Emu.CGBMode) @truncate(x&7) else @truncate(7 - (x&7))) & 1;
-        const BGHiBit :u8 = (BGHi >> if(BG_Attr.XFlip and self.Emu.CGBMode) @truncate(x&7) else @truncate(7 - (x&7))) & 1;
-        
-        const BGPallete = self.pmem.grabPalette(if(self.Emu.CGBMode) BG_Attr.ColorPalette else 0, true); 
-        const BG_index = (BGHiBit << 1) | BGLoBit;
-
-        // Lets set The bit initially to BG color
-        self.screen[X][LY] = BGPallete[BG_index];
-
-        // in DMG compatability mode if bit 0 of lcdc is on screen is blank only sprites
-        // if(lcdc.BGWindowPriority == 1 and !self.Emu.CGBMode) self.screen[X][LY] = 0x0000;
-
-        // Now we can do the Sprite Pixel
-        var SpriteEntry: ?OAMEntry = null;
-
-        var i : usize = 0;
-        while(i < spriteCount) : (i += 1){
-            if(X+8 >= self.oam.Entries[sprites[i]].X and X+8 <= self.oam.Entries[sprites[i]].X + 7 ){
-                SpriteEntry = self.oam.Entries[sprites[i]];
-
-                if(SpriteEntry) |Sprite|{
-
-
-                    var SpriteX:u8 = X + 8 - Sprite.X;
-                    var SpriteY:u8 = LY + 16 - Sprite.Y;
-                    const SpriteHeight:u8 = if(lcdc.OBJsize) 16 else 8;
-
-                    if(Sprite.XFlip) SpriteX = 7-SpriteX;
-                    if(Sprite.YFlip) SpriteY = (SpriteHeight-1) - SpriteY;
-
-                    // Grab our hi and lo bytes
-                    const SpriteLo:u8 = self.vram.Banks[if(self.Emu.CGBMode) Sprite.Bank_No else 0][(@as(u32,(Sprite.tile))*16) + @as(u32,SpriteY) * 2];
-                    const SpriteHi:u8 = self.vram.Banks[if(self.Emu.CGBMode) Sprite.Bank_No else 0][(@as(u32,(Sprite.tile))*16) + @as(u32,SpriteY) * 2 + 1]; 
-                    
-                    const SpriteLoBit :u8 = (SpriteLo >> @truncate(7 - SpriteX)) & 1;
-                    const SpriteHiBit :u8 = (SpriteHi >> @truncate(7 - SpriteX)) & 1;
-
-                    
-                    // Now we will take our Pixels and mix them based off priority
-                    
-                    const OBJ_index = (SpriteHiBit << 1) | SpriteLoBit;
-
-                    // This priority is only for CGB mo
-                    if(self.Emu.CGBMode){
-
-                        const OBJPalette = self.pmem.grabPalette(Sprite.CGB_Palette, false);
-                        const ProrityBitmap :u3 = ((@as(u3,lcdc.BGWindowPriority)<<2)|(@as(u3,Sprite.Priority)<<1)|@as(u3,BG_Attr.Priority));
-
-                        const BGPriority:bool = switch (ProrityBitmap) {
-                            0b101 => (BG_index != 0), // if BG color is 1-3 OBJ priority is false
-                            0b110 => (BG_index != 0),
-                            0b111 => (BG_index != 0),
-                            else => false, // OBJ Wins
-                        };
-
-                        if(!BGPriority and OBJ_index != 0) self.screen[X][LY] = OBJPalette[OBJ_index];
-                    }
-                    else{ // DMG Compatability Mode
-
-                        const OBJPalette = self.pmem.grabPalette(@as(u3,Sprite.Palette), false);
-
-                        if(OBJ_index != 0x00){
-
-                            if(Sprite.Priority == 1){
-
-                                if(BG_index == 0x00){
-                                    self.screen[X][LY] = OBJPalette[OBJ_index]; 
-                                }
-                            }
-                            else{
-                                self.screen[X][LY] = OBJPalette[OBJ_index];
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-    }
 
     pub fn read(self : *PPU, address: u16) u8{
 
@@ -612,12 +476,10 @@ const PaletteMemory = struct {
     BCPS : AddressFormat = @bitCast(@as(u8,0x00)),
     OCPS : AddressFormat = @bitCast(@as(u8,0x00)),
 
-    // DMG Colors
     const DMGPallete : [8]u8 = .{
         0xFF, 0xFF,
         0xB5, 0x56,
-        0x29, 0x25,
-        //0b11100111, 0b10011000,
+        0x4A, 0x29,
         0x00, 0x00,
     };
 
@@ -627,7 +489,7 @@ const PaletteMemory = struct {
     }
 
     pub fn writeOBJ(self: *PaletteMemory,data:u8)void{
-        self.OBJPRAM[self.OCPS.Address] = data;
+        self.OBJPRAM[self.OCPS.Address&0x3F] = data;
         if(self.OCPS.autoInc) self.OCPS.Address +%= 1;
     }
 
@@ -637,7 +499,7 @@ const PaletteMemory = struct {
 
     pub fn writeBG(self: *PaletteMemory,data:u8)void{
 
-        self.BGPRAM[self.BCPS.Address] = data;
+        self.BGPRAM[self.BCPS.Address&0x3F] = data;
         if(self.BCPS.autoInc) self.BCPS.Address +%= 1;
     }
 
@@ -657,34 +519,44 @@ const PaletteMemory = struct {
     /// input goes BGP OBJ0 OBJ1
     pub fn updateDMGPalette(self : *PaletteMemory, dmgPalette:u8, i : u2) void{
         
+        // dmg palette   
+        // 76 : ID3 
+        // 54 : ID2 
+        // 32 : ID1 
+        // 10 : ID0
         
-        const dmgArray: [4]u2 = .{
-            @intCast((dmgPalette >> 0) & 0b11),
-            @intCast((dmgPalette >> 2) & 0b11),
-            @intCast((dmgPalette >> 4) & 0b11),
-            @intCast((dmgPalette >> 6) & 0b11),
+        const dmgArray: [4]u2 = .{ 
+            @truncate(dmgPalette), 
+            @truncate(dmgPalette >> 2), 
+            @truncate(dmgPalette >> 4),
+            @truncate(dmgPalette >> 6)
         };
-        //const dmgArray : [4]u2 = @bitCast(dmgPalette);
+
         switch (i) {
             1 => {
-                for(dmgArray) |color|{
-                    const offset = @as(u8,color)*2;
-                    self.BGPRAM[offset] = DMGPallete[offset];
-                    self.BGPRAM[offset+1] = DMGPallete[offset+1];
+                for(0..4) |ID|{
+                    const IDcolorOffset = @as(u8,dmgArray[ID])*2;
+                    const pOffset:u8 = @intCast(ID*2);
+                    self.BGPRAM[pOffset] = DMGPallete[IDcolorOffset];
+                    self.BGPRAM[pOffset+1] = DMGPallete[IDcolorOffset+1];
                 }
+                
             },
             2 =>{
-                for(dmgArray) |color|{
-                    const offset = @as(u8,color)*2;
-                    self.OBJPRAM[offset] = DMGPallete[offset];
-                    self.OBJPRAM[offset+1] = DMGPallete[offset+1];
+                for(0..4) |ID|{
+                    const IDcolorOffset = @as(u8,dmgArray[ID])*2;
+                    const pOffset:u8 = @intCast(ID*2);
+                    self.OBJPRAM[pOffset] = DMGPallete[IDcolorOffset];
+                    self.OBJPRAM[pOffset+1] = DMGPallete[IDcolorOffset+1];
                 }
             },
             3 =>{
-                for(dmgArray) |color|{
-                    const offset = @as(u8,color)*2;
-                    self.OBJPRAM[offset + 8] = DMGPallete[offset];
-                    self.OBJPRAM[offset + 9] = DMGPallete[offset+1];
+
+                for(0..4) |ID|{
+                    const IDcolorOffset = @as(u8,dmgArray[ID])*2;
+                    const pOffset:u8 = @intCast(ID*2);
+                    self.OBJPRAM[pOffset+8] = DMGPallete[IDcolorOffset];
+                    self.OBJPRAM[pOffset+9] = DMGPallete[IDcolorOffset+1];
                 }
             },
             else => unreachable,

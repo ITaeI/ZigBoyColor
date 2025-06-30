@@ -11,13 +11,15 @@ pub const Timer = struct {
     TMA : Register8Bit = undefined,
     TAC : Register8Bit = undefined,
 
-    var TimaOverflowOccured: bool = false;
-    var OverflowCounter : u8 = 0;
+    TimaOverflowOccured: bool,
+    OverflowCounter : u8,
 
     pub fn init(parentPtr : *GBC)Timer{
 
         var T = Timer{
-            .Emu = parentPtr
+            .Emu = parentPtr,
+            .TimaOverflowOccured = false,
+            .OverflowCounter = 0,
         };
         T.DIV.set(0xABCC);
         T.TIMA.set(0x00);
@@ -37,8 +39,8 @@ pub const Timer = struct {
             // Apu Count
         } 
 
-        if(TimaOverflowOccured){
-            OverflowCounter += 1;
+        if(self.TimaOverflowOccured){
+            self.OverflowCounter += 1;
         }
 
         // Bit 2 determines if timer is on
@@ -54,14 +56,14 @@ pub const Timer = struct {
             if(FallingEdge){
                 self.TIMA.Inc();
                 if(self.TIMA.get() == 0x00){
-                    TimaOverflowOccured =true;
+                    self.TimaOverflowOccured =true;
                 }
             }
         }
 
-        if(TimaOverflowOccured and OverflowCounter == 4){
-                OverflowCounter = 0;
-                TimaOverflowOccured = false;
+        if(self.TimaOverflowOccured and self.OverflowCounter == 4){
+                self.OverflowCounter = 0;
+                self.TimaOverflowOccured = false;
                 self.TIMA.set(self.TMA.get());
 
                 // Request Timer interrupt (bit 2)
