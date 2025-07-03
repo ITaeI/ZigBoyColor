@@ -6,6 +6,8 @@ const PPU = @import("PPU.zig").PPU;
 const Timer  = @import("Timer.zig").Timer;
 const DMA = @import("DMA.zig").DMA;
 
+const GUI = @import("GUI.zig").GUI;
+
 pub const GBC = struct {
 
     // Here is the CPU
@@ -31,13 +33,7 @@ pub const GBC = struct {
     DoubleSpeed : KEY1 = @bitCast(@as(u8,0x7E)),
 
     ticks : u64 = 0,
-    pub fn init(self: *GBC, Rom: []const u8) !void{
-
-        self.FrameFinished = false;
-        self.CGBMode = false;
-
-        // Double speed variables
-        self.DoubleSpeed = @bitCast(@as(u8,0x7E));
+    pub fn init(self: *GBC, parentPtr: *GUI, Rom: []const u8) !void{
 
         // Here we Initalize the Cartridge and load the rom
         self.cart = Cart{.GBC = self,.alloc = std.heap.page_allocator};
@@ -47,7 +43,7 @@ pub const GBC = struct {
         // need to setup Opcode Tables
         self.cpu.setupOpcodeTables();
 
-        self.ppu = PPU.init(self);
+        self.ppu = PPU.init(self,parentPtr);
         self.timer = Timer.init(self);
         self.dma = DMA.init(self);
         self.bus = MMap.init(self);

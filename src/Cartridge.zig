@@ -25,10 +25,11 @@ pub const Cartridge = struct {
         self.filePath = filePath;
         
         // Open file
-        const file = try std.fs.openFileAbsolute(
+        const file = try std.fs.cwd().openFile(
             filePath, 
             .{.mode = .read_only}
         );
+
         // defer closing file
         defer file.close();
         // also close if an error is thrown
@@ -59,6 +60,12 @@ pub const Cartridge = struct {
             0x11 => MBC{.MBC3 = MBC3{.Emu = self.GBC,.Header = self.header,.Data = &self.romData,}},
             0x12 => MBC{.MBC3 = MBC3{.Emu = self.GBC,.Header = self.header,.Data = &self.romData,.HasRam= true}},
             0x13 => MBC{.MBC3 = MBC3{.Emu = self.GBC, .Header = self.header,.Data = &self.romData,.HasBattery = true}},
+            0x19 => MBC{.MBC5 = MBC5{.Header = self.header,.Data = &self.romData,}},
+            0x1A => MBC{.MBC5 = MBC5{.Header = self.header,.Data = &self.romData,.HasRam= true}},
+            0x1B => MBC{.MBC5 = MBC5{.Header = self.header,.Data = &self.romData,.HasRam= true, .HasBattery = true}},
+            0x1C => MBC{.MBC5 = MBC5{.Header = self.header,.Data = &self.romData,.HasRumble = true}},
+            0x1D => MBC{.MBC5 = MBC5{.Header = self.header,.Data = &self.romData,.HasRumble = true, .HasRam= true}},
+            0x1E => MBC{.MBC5 = MBC5{.Header = self.header,.Data = &self.romData,.HasRumble = true, .HasRam= true , .HasBattery = true}},
             else => return error.UnsupportedMemoryBankController,
         };
         // Check to see if the CGB Flag is set (Last byte of Title is CGB flag)
@@ -148,6 +155,7 @@ const MBC = union(enum){
     MBC1 : MBC1,
     MBC2 : MBC2,
     MBC3 : MBC3,
+    MBC5 : MBC5,
 };
 
 fn changeFileType(allocator: std.mem.Allocator, fileIn: []const u8, extension: []const u8) ![]const u8 {
@@ -522,6 +530,80 @@ const MBC3 = struct {
     }
 };
 
+const MBC5 = struct {
+
+    HasRam : bool = false,
+    HasBattery : bool = false,
+    HasRumble : bool = false,
+
+    Data : *[]u8,
+    Header : *Header,
+
+    RAM : [0x20000]u8 = [_]u8{0} ** 0x20000,
+    currentRamBank: u8 = 0,
+    currentRomBank: u16 = 0,
+
+    ramEnabled : bool = false,
+
+    pub fn read(self: *MBC5,address: u16) u8{
+
+        return switch (address) {
+            0...0x3FFF => self.Data.*[address],
+            0x4000...0x7FFF => self.Data.*[@as(u32,(address - 0x4000)) + @as(u32,self.currentRomBank) * 0x4000],
+            0xA000...0xBFFF => blk :{
+                if(!self.ramEnabled) break :blk 0xFF;
+                
+                break :blk self.RAM[@as(u32,(address - 0xA000)) + (@as(u32,self.currentRamBank) * 0x2000)];
+
+            },
+            else => 0xFF,
+        };
+    }
+
+    pub fn write(self: *MBC5,address : u16, data : u8) void {
+        switch (address) {
+            0...0x1FFF => self.ramEnabled = ((data&0xF) == 0xA),
+            0x2000...0x2FFF => self.currentRomBank = self.currentRomBank&0xFF00 | @as(u16,data), // bottom 8 bits of RomBank
+            0x3000...0x3FFF => self.currentRomBank = (self.currentRomBank&0xFF) | (@as(u16,data&1) << 8), // 9th bit
+            0x4000...0x5FFF => self.currentRamBank = data,
+            0xA000...0xBFFF => {
+                if(!self.ramEnabled) return;
+                self.RAM[@as(u32,(address - 0xA000)) + (@as(u32,self.currentRamBank) * 0x2000)] = data;
+            },
+            else => {},
+        }
+    }
+
+    // fn calculateBanks(self: *MBC5) void{
+    //     switch (self.Header.rom_size) {
+    //         0...4 => {
+    //             self.HighBank = self.currentRomBank;  
+    //             self.ZeroBank = 0;
+    //         },
+    //         5 => {
+    //             self.HighBank = (self.currentRomBank & 0b11011111) | ((self.currentRamBank & 0x1) << 5);
+    //             self.ZeroBank = (self.currentRamBank & 0x1) << 5;
+    //         },
+    //         6 => {
+    //             self.HighBank = (self.currentRomBank & 0b10011111) | ((self.currentRamBank & 0x3) << 5);
+    //             self.ZeroBank = (self.currentRamBank & 0x3) << 5;
+    //         },
+    //         else => self.HighBank = self.currentRomBank,
+    //     }
+    // }
+
+    pub fn save(self: *MBC5 ,filePath : []const u8) !void{
+
+        try saveFile(filePath, self.RAM[0..],".sav");
+    }
+
+    pub fn reloadSave(self: *MBC5 ,filePath : []const u8) !void{
+
+        try reloadsaveFile(filePath, self.RAM[0..],".sav");
+    }
+
+};
+
 fn saveFile(filePath: []const u8, ramSlice : []u8, extension: []const u8) !void{
 
     var buffer: [256]u8 = undefined;
@@ -531,11 +613,11 @@ fn saveFile(filePath: []const u8, ramSlice : []u8, extension: []const u8) !void{
     const saveFilePath = try changeFileType(allocator,filePath, extension);
     defer allocator.free(saveFilePath);
 
-    var file = std.fs.createFileAbsolute(saveFilePath,.{.read = true})
+    var file = std.fs.cwd().createFile(saveFilePath,.{.read = true})
 
     // if save file alread exists open that instead
     catch |err| switch (err) {
-        error.PathAlreadyExists => try std.fs.openFileAbsolute(saveFilePath, .{ .mode = .read_write }),
+        error.PathAlreadyExists => try std.fs.cwd().openFile(saveFilePath, .{ .mode = .read_write }),
         else => unreachable,
     }; 
 
@@ -555,7 +637,7 @@ fn reloadsaveFile(filePath: []const u8, ramSlice : []u8, extension : []const u8)
     const saveFilePath = try changeFileType(allocator,filePath,extension);
     defer allocator.free(saveFilePath);
 
-    var file = try std.fs.openFileAbsolute(saveFilePath, .{ .mode = .read_write });
+    var file = try std.fs.cwd().openFile(saveFilePath, .{ .mode = .read_write });
 
     defer file.close();
     errdefer file.close();

@@ -2259,8 +2259,59 @@ fn STOP(cpu: *SM83, _ : Op, _ : Op) void
         cpu.Emu.DoubleSpeed.Active = !cpu.Emu.DoubleSpeed.Active;
         cpu.Emu.DoubleSpeed.Armed = false;
     } 
+    // Button Held Down
+    // if(cpu.Emu.bus.io.joypad.read() != 0xCF){
+    //     // if so check interrupt pending
+    //     if((cpu.regs.IF.get() & cpu.regs.IE.get())&0x1F != 0){
+    //         return;
+    //     }else{
+
+    //         // discard byte halted is true
+    //         _ = cpu.readMem(cpu.regs.pc);
+    //         cpu.isHalted = true;
+    //         cpu.dmaWasActive = cpu.Emu.dma.VRAMTransferInProgress; 
+    //         cpu.Emu.dma.VRAMTransferInProgress = false;
+    //     }
+    // // Nope, Check If speed was armed
+    // }else if(!cpu.Emu.DoubleSpeed.Armed){
+
+    //     // If speed change was armed, see if an int is pending
+    //     if((cpu.regs.IF.get() & cpu.regs.IE.get())&0x1F != 0){
+            
+    //         // if so stop mode is entered and div reset
+    //         cpu.isStopped = true;
+    //         cpu.Emu.timer.DIV.set(0); // TODO: maybe only set hi to 0
+
+    //         // If not we descard a byte, enter stop mode, div reset
+    //     }else{
+    //         _ = cpu.readMem(cpu.regs.pc); // TODO: Maybe just inc PC
+    //         cpu.isStopped = true;
+    //         cpu.Emu.timer.DIV.set(0);
+    //     }
+
+    // }else if ((cpu.regs.IF.get() & cpu.regs.IE.get())&0x1F == 0){
         
-    
+    //     // if no interrupt pending
+
+    //     // byte discarded
+    //     _ = cpu.readMem(cpu.regs.pc);
+    //     // halte mode entered
+    //     cpu.isHalted = true;
+    //     cpu.dmaWasActive = cpu.Emu.dma.VRAMTransferInProgress; 
+    //     cpu.Emu.dma.VRAMTransferInProgress = false;
+    //     //DIV reset
+    //     cpu.Emu.timer.DIV.set(0);
+    //     // Speed chages
+    //     cpu.Emu.DoubleSpeed.Active = !cpu.Emu.DoubleSpeed.Active;
+    //     cpu.Emu.DoubleSpeed.Armed = false;
+    // }else if(!cpu.IME){
+    //     unreachable;
+    // }else{
+    //     cpu.Emu.timer.DIV.set(0);
+    //     // Speed changes
+    //     cpu.Emu.DoubleSpeed.Active = !cpu.Emu.DoubleSpeed.Active;
+    //     cpu.Emu.DoubleSpeed.Armed = false;   
+    // }   
 }
 
 fn DI(cpu: *SM83, _ : Op, _ : Op) void 

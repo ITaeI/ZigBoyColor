@@ -56,11 +56,11 @@ pub const MemoryMap =struct {
                 if(self.dma.OAMTransferInProgress or self.ppu.mode == .OAMScan or self.ppu.mode == .DrawingPixels) break :blk 0xFF;
                 break :blk self.ppu.oam.read(address);
             }, // DMA
-            0xFEA0...0xFEFF => 0, // unusable
+            0xFEA0...0xFEFF => 0xFF, // unusable
             0xFF00...0xFF7F => self.io.read(address), // IO
             0xFF80...0xFFFE => self.hram[address - 0xFF80], // High Ram
             0xFFFF => self.cpu.regs.IE.get(), // IE register
-            else => 0,
+            else => 0xFF,
         };
     }
 
@@ -143,10 +143,7 @@ const IO = struct {
             0xFF4F => 0xFE | (self.ppu.vram.CurrentBank&1),
             0xFF50 => 0xFF, // Bootrom Disable?
             0xFF55 => self.dma.read(),
-            0xFF68...0xFF6B => blk:{
-                if(self.ppu.mode == .DrawingPixels) break :blk 0xFF;
-                break :blk self.ppu.read(address);
-            }, // CGB Color Palettes
+            0xFF68...0xFF6B => self.ppu.read(address), // CGB Color Palettes
             0xFF70 => self.Emu.bus.wram.CurrentBank, 
             else => 0xFF,
         };
@@ -167,10 +164,7 @@ const IO = struct {
             0xFF4F => self.ppu.vram.CurrentBank = data&1,
             0xFF50 => return, // Bootrom Disable?
             0xFF51...0xFF55 => self.dma.write(address, data),
-            0xFF68...0xFF6B => {
-                if(self.ppu.mode == .DrawingPixels) return;
-                self.ppu.write(address, data);
-            }, // CGB Color Palettes
+            0xFF68...0xFF6B => self.ppu.write(address, data), // CGB Color Palettes
             0xFF6C => return, // object priority mode - set at the beginning
             0xFF70 => self.Emu.bus.wram.CurrentBank = if(data & 7 == 0 ) 1 else (data & 7 ), 
             else => return,

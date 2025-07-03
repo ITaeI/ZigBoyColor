@@ -35,9 +35,9 @@ pub const DMA = struct {
 
         if(!self.Emu.CGBMode) return;
         switch (address) {
-            0xFF51 => self.HDMA12 = (self.HDMA12&0x80FF) | (@as(u16,data) << 8),
+            0xFF51 => self.HDMA12 = (self.HDMA12&0x00FF) | (@as(u16,data) << 8),
             0xFF52 => self.HDMA12 = (self.HDMA12&0xFF00) | @as(u16,data&0xF0),
-            0xFF53 => self.HDMA34 = (self.HDMA34&0x80FF) | (@as(u16,data) << 8),
+            0xFF53 => self.HDMA34 = (self.HDMA34&0x00FF) | (@as(u16,data&0x1F) << 8),
             0xFF54 => self.HDMA34 = (self.HDMA34&0xFF00) | @as(u16,data&0xF0),
             0xFF55 => self.startVRAMTransfer(data),
             else => {},        
@@ -48,7 +48,7 @@ pub const DMA = struct {
     pub fn read(self : *DMA)u8{
         if(!self.Emu.CGBMode) return 0xFF;
         const active : u8 = @as(u8,@intFromBool(self.VRAMTransferInProgress)) << 7;
-        return ((~active) & 0x80) | @as(u8,@bitCast(self.HDMA5));
+        return ((~active) & 0x80) | @as(u8,self.HDMA5.TransferLength);
     }
 
     fn startVRAMTransfer(self: *DMA,data:u8)void{
@@ -89,20 +89,21 @@ pub const DMA = struct {
 
         var i:u16 = 0;
         while(i < 0x10) : (i +=1){
-            const Src: u8 = self.Emu.bus.read(self.HDMA12+i);
-            self.vram.write(self.HDMA34+i, Src);
+            const Src: u8 = self.Emu.bus.read(self.HDMA12+%i);
+            self.vram.write(self.HDMA34+%i, Src);
         }
 
         self.HDMA12 +%= 0x10;
         self.HDMA34 +%= 0x10;
 
 
-        if(self.HDMA5.TransferLength == 0x00){
+        self.HDMA5.TransferLength -%= 1;
+
+        if(self.HDMA5.TransferLength == 0x7F){
             self.VRAMTransferInProgress = false;
             return;
         }
 
-        self.HDMA5.TransferLength -= 1;
     }
 
     pub fn GeneralPurpose(self: *DMA)void{
@@ -110,8 +111,8 @@ pub const DMA = struct {
         
         var i:u16 = 0;
         while(i < ((@as(u16,self.HDMA5.TransferLength) + 1) * 0x10)) : (i+=1){
-            const Src : u8 = self.Emu.bus.read(self.HDMA12+i);
-            self.vram.write(self.HDMA34+i, Src);
+            const Src : u8 = self.Emu.bus.read(self.HDMA12+%i);
+            self.vram.write(self.HDMA34+%i, Src);
         }
 
         self.VRAMTransferInProgress = false;
