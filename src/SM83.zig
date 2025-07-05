@@ -12,10 +12,16 @@ pub const SM83 = struct {
     IME: bool = false,
     IMEWait : bool = false,
     IMEWaitCount : u8 = 0,
+
     isHalted : bool = false,
     HaltBug : bool = false,
+    HaltCount : u16 = 0,
 
     dmaWasActive: bool = false,
+
+    isStopped : bool = false,
+
+    const MaxHalt : u16 = 0x8000;
 
     pub fn init(parentPtr : *GBC) SM83{
 
@@ -26,6 +32,12 @@ pub const SM83 = struct {
     }
 
     pub fn step(self : *SM83) void{
+
+        // if cpu is in a stopped state
+        if(self.isStopped and self.Emu.bus.io.joypad.read() == 0xCF){
+            self.Emu.FrameFinished = true;
+            return;
+        }else self.isStopped = false;
 
         if(!self.isHalted){
 
@@ -51,6 +63,8 @@ pub const SM83 = struct {
 
 
                 const i = self.OpcodeTable[opcode];
+                // std.debug.print("Instr: {s} ", .{i.mnemonic});
+                // std.debug.print("PC: {x}\n", .{self.regs.pc});
                 i.handler(self, i.Op1, i.Op2); 
 
 
@@ -60,10 +74,21 @@ pub const SM83 = struct {
             self.Emu.cycle();
             if((self.regs.IE.get() & self.regs.IF.get())&0x1F != 0){
                 self.isHalted = false;
+                self.HaltCount = 0;
+                if(self.dmaWasActive){
+                    self.Emu.dma.VRAMTransferInProgress = self.dmaWasActive;
+                    self.dmaWasActive = false;
+                }
+            }
 
-
-                self.Emu.dma.VRAMTransferInProgress = self.dmaWasActive;
-                self.dmaWasActive = false;
+            self.HaltCount += 1;
+            if(self.HaltCount == MaxHalt){
+                self.HaltCount = 0;
+                self.isHalted = false;
+                if(self.dmaWasActive){
+                    self.Emu.dma.VRAMTransferInProgress = self.dmaWasActive;
+                    self.dmaWasActive = false;
+                }
             }
         }
 
@@ -90,11 +115,15 @@ pub const SM83 = struct {
 
         var IntVector: u16 = 0x40;
         // check leading zeros to find which interrupt to service
-        const zct: u3 = @truncate(@ctz(self.regs.IF.get())); // TODO: Why does IF work on some games and IE works on others
+        const zct: u3 = @truncate(@ctz(self.regs.IF.get())); 
         if(zct < 5){
             if(self.regs.IE.getBit(zct) == 1 and self.regs.IF.getBit(zct) == 1 ){
                 
                 self.isHalted = false;
+                if(self.dmaWasActive){
+                    self.Emu.dma.VRAMTransferInProgress = self.dmaWasActive;
+                    self.dmaWasActive = false;
+                }
                 self.Emu.cycle();
                 self.Emu.cycle();
 
@@ -105,10 +134,11 @@ pub const SM83 = struct {
                 self.regs.sp.Dec();
                 self.writeMem(self.regs.sp.get(), @truncate(self.regs.pc));
                 
+                self.Emu.cycle();
+
                 // 1 last cycle setting new PC value
                 IntVector += (8 * @as(u16,zct));
                 self.regs.pc = IntVector;
-                self.Emu.cycle();
 
                 // reset ime flag
                 self.IME = false;
@@ -961,6 +991,7 @@ fn LD_DE_A(cpu: *SM83, _ : Op, _ : Op) void
 
 fn LD_A_u16(cpu: *SM83, _ : Op, _ : Op) void 
 {
+    
     const n : u8 = cpu.readMem(cpu.fetch16bits());
     cpu.regs.af.a.set(n);
     
@@ -2231,6 +2262,8 @@ fn HALT(cpu: *SM83, _ : Op, _ : Op) void
     if (cpu.IME)
     {
         cpu.isHalted = true;
+        cpu.dmaWasActive = cpu.Emu.dma.VRAMTransferInProgress; 
+        cpu.Emu.dma.VRAMTransferInProgress = false;
     }
     else
     {
@@ -2254,64 +2287,65 @@ fn HALT(cpu: *SM83, _ : Op, _ : Op) void
 fn STOP(cpu: *SM83, _ : Op, _ : Op) void 
 {
     // if double speed is set and armed then we swap to a different speed
-    if(cpu.Emu.DoubleSpeed.Armed)
-    {
-        cpu.Emu.DoubleSpeed.Active = !cpu.Emu.DoubleSpeed.Active;
-        cpu.Emu.DoubleSpeed.Armed = false;
-    } 
-    // Button Held Down
-    // if(cpu.Emu.bus.io.joypad.read() != 0xCF){
-    //     // if so check interrupt pending
-    //     if((cpu.regs.IF.get() & cpu.regs.IE.get())&0x1F != 0){
-    //         return;
-    //     }else{
-
-    //         // discard byte halted is true
-    //         _ = cpu.readMem(cpu.regs.pc);
-    //         cpu.isHalted = true;
-    //         cpu.dmaWasActive = cpu.Emu.dma.VRAMTransferInProgress; 
-    //         cpu.Emu.dma.VRAMTransferInProgress = false;
-    //     }
-    // // Nope, Check If speed was armed
-    // }else if(!cpu.Emu.DoubleSpeed.Armed){
-
-    //     // If speed change was armed, see if an int is pending
-    //     if((cpu.regs.IF.get() & cpu.regs.IE.get())&0x1F != 0){
-            
-    //         // if so stop mode is entered and div reset
-    //         cpu.isStopped = true;
-    //         cpu.Emu.timer.DIV.set(0); // TODO: maybe only set hi to 0
-
-    //         // If not we descard a byte, enter stop mode, div reset
-    //     }else{
-    //         _ = cpu.readMem(cpu.regs.pc); // TODO: Maybe just inc PC
-    //         cpu.isStopped = true;
-    //         cpu.Emu.timer.DIV.set(0);
-    //     }
-
-    // }else if ((cpu.regs.IF.get() & cpu.regs.IE.get())&0x1F == 0){
-        
-    //     // if no interrupt pending
-
-    //     // byte discarded
-    //     _ = cpu.readMem(cpu.regs.pc);
-    //     // halte mode entered
-    //     cpu.isHalted = true;
-    //     cpu.dmaWasActive = cpu.Emu.dma.VRAMTransferInProgress; 
-    //     cpu.Emu.dma.VRAMTransferInProgress = false;
-    //     //DIV reset
-    //     cpu.Emu.timer.DIV.set(0);
-    //     // Speed chages
+    // if(cpu.Emu.DoubleSpeed.Armed)
+    // {
     //     cpu.Emu.DoubleSpeed.Active = !cpu.Emu.DoubleSpeed.Active;
     //     cpu.Emu.DoubleSpeed.Armed = false;
-    // }else if(!cpu.IME){
-    //     unreachable;
-    // }else{
-    //     cpu.Emu.timer.DIV.set(0);
-    //     // Speed changes
-    //     cpu.Emu.DoubleSpeed.Active = !cpu.Emu.DoubleSpeed.Active;
-    //     cpu.Emu.DoubleSpeed.Armed = false;   
-    // }   
+    // } 
+
+    //Button Held Down
+    if(cpu.Emu.bus.io.joypad.read() != 0xCF){
+        // if so check interrupt pending
+        if((cpu.regs.IF.get() & cpu.regs.IE.get())&0x1F != 0){
+            return;
+        }else{
+
+            // discard byte halted is true
+            _ = cpu.readMem(cpu.regs.pc);
+            cpu.isHalted = true;
+            cpu.dmaWasActive = cpu.Emu.dma.VRAMTransferInProgress; 
+            cpu.Emu.dma.VRAMTransferInProgress = false;
+        }
+    // Nope, Check If speed was armed
+    }else if(!cpu.Emu.DoubleSpeed.Armed){
+
+        // If speed change was armed, see if an int is pending
+        if((cpu.regs.IF.get() & cpu.regs.IE.get())&0x1F != 0){
+            
+            // if so stop mode is entered and div reset
+            cpu.isStopped = true;
+            cpu.Emu.timer.DIV.set(0); // TODO: maybe only set hi to 0
+
+            // If not we descard a byte, enter stop mode, div reset
+        }else{
+            _ = cpu.readMem(cpu.regs.pc); // TODO: Maybe just inc PC
+            cpu.isStopped = true;
+            cpu.Emu.timer.DIV.set(0);
+        }
+
+    }else if ((cpu.regs.IF.get() & cpu.regs.IE.get())&0x1F == 0){
+        
+        // if no interrupt pending
+
+        // byte discarded
+        _ = cpu.readMem(cpu.regs.pc);
+        // halt mode entered
+        cpu.isHalted = true;
+        cpu.dmaWasActive = cpu.Emu.dma.VRAMTransferInProgress; 
+        cpu.Emu.dma.VRAMTransferInProgress = false;
+        //DIV reset
+        cpu.Emu.timer.DIV.set(0);
+        // Speed chages
+        cpu.Emu.DoubleSpeed.Active = !cpu.Emu.DoubleSpeed.Active;
+        cpu.Emu.DoubleSpeed.Armed = false;
+    }else if(!cpu.IME){
+        unreachable;
+    }else{
+        cpu.Emu.timer.DIV.set(0);
+        // Speed changes
+        cpu.Emu.DoubleSpeed.Active = !cpu.Emu.DoubleSpeed.Active;
+        cpu.Emu.DoubleSpeed.Armed = false;   
+    }   
 }
 
 fn DI(cpu: *SM83, _ : Op, _ : Op) void 
@@ -2320,14 +2354,12 @@ fn DI(cpu: *SM83, _ : Op, _ : Op) void
     cpu.IMEWait = false;
     cpu.IMEWaitCount = 0;
     
-    
 }
 
 fn EI(cpu: *SM83, _ : Op, _ : Op) void
 {
     cpu.IMEWait = true;
     cpu.IMEWaitCount = 0;
-    
     
 }
 

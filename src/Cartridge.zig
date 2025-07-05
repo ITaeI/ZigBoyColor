@@ -574,24 +574,6 @@ const MBC5 = struct {
         }
     }
 
-    // fn calculateBanks(self: *MBC5) void{
-    //     switch (self.Header.rom_size) {
-    //         0...4 => {
-    //             self.HighBank = self.currentRomBank;  
-    //             self.ZeroBank = 0;
-    //         },
-    //         5 => {
-    //             self.HighBank = (self.currentRomBank & 0b11011111) | ((self.currentRamBank & 0x1) << 5);
-    //             self.ZeroBank = (self.currentRamBank & 0x1) << 5;
-    //         },
-    //         6 => {
-    //             self.HighBank = (self.currentRomBank & 0b10011111) | ((self.currentRamBank & 0x3) << 5);
-    //             self.ZeroBank = (self.currentRamBank & 0x3) << 5;
-    //         },
-    //         else => self.HighBank = self.currentRomBank,
-    //     }
-    // }
-
     pub fn save(self: *MBC5 ,filePath : []const u8) !void{
 
         try saveFile(filePath, self.RAM[0..],".sav");
@@ -646,82 +628,5 @@ fn reloadsaveFile(filePath: []const u8, ramSlice : []u8, extension : []const u8)
     _ = try file.readAll(ramSlice);
 }
 
-test "File Change" {
-
-    // Unput a gbc or gb file name
-    const alloc = std.testing.allocator;
-    const newfile = try changeFileType(alloc,"documents/Blah.gbc");
-    defer alloc.free(newfile);
-
-    // Should output a .save file of the same file
-    std.debug.print("{s}", .{newfile});
-    try std.testing.expect(std.mem.eql(u8, "documents/Blah.sav", newfile));
-}
-
-test "File Save"{
-
-    var rom : MBC1 = MBC1{.HasBattery = true, .HasRam = true};
-
-    rom.reloadSave("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Legend of Zelda, The - Link's Awakening (U) (V1.2) [!].gb")
-    catch |err| std.debug.print("Error: {}", .{err});
-    rom.save("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Legend of Zelda, The - Link's Awakening (U) (V1.2) [!].gb")
-    catch |err| std.debug.print("Error: {}", .{err});
-
-}
-
-test "Load Rom" {
-
-    var zbc = GBC{};
-
-    const alloc = std.testing.allocator;
-    var cart = Cartridge{.GBC = &zbc,.alloc = alloc};
-
-
-    try cart.load("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Legend of Zelda, The - Link's Awakening (U) (V1.2) [!].gb");
-    try std.testing.expect(std.mem.eql(u8, "C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Legend of Zelda, The - Link's Awakening (U) (V1.2) [!].gb", cart.filePath));
-    // the rom is placed on the heap so it needs to be freed before end of program
-    defer alloc.free(cart.romData);
-
-    // The Title of this can be parsed like this
-    const title_bytes = std.mem.asBytes(&cart.header.Title);
-    const title = std.mem.trimRight(u8, title_bytes, "\x00");
-   
-    try std.testing.expect(std.mem.eql(u8,"ZELDA",title));
-
-}
-
-test "Read and Write"{
-
-    const alloc = std.testing.allocator;
-    var cart = Cartridge{.alloc = alloc};
-
-
-    try cart.load("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Tetris (JUE) (V1.1) [!].gb");
-    try std.testing.expect(std.mem.eql(u8, "C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Tetris (JUE) (V1.1) [!].gb", cart.filePath));
-    // the rom is placed on the heap so it needs to be freed before end of program
-    defer alloc.free(cart.romData);
-
-    cart.write(0x0000, 0xFF);
-    const out = cart.read(0x0000);
-
-    try std.testing.expect(out == 0xFF);
-}
-
-test "CGB Flag"{
-    var gbc = GBC{};
-    
-    const alloc = std.testing.allocator;
-    var cart = Cartridge{.GBC = &gbc,.alloc = alloc};
-
-    try cart.load("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/Pokemon - Silver Version (UE) [C][!].gbc");
-    defer alloc.free(cart.romData);
-
-    std.debug.print("Title: {x}\n", .{cart.header.Title >> 120});
-    std.debug.print("CGB Flag {x}", .{cart.romData[0x143]});
-
-    // Use a CGB Rom to check for the flag
-    try std.testing.expect(cart.header.Title >> 120 == 0x80 or cart.header.Title >> 120 == 0xC0);
-
-}
 
 

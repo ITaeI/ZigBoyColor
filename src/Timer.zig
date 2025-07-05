@@ -62,12 +62,12 @@ pub const Timer = struct {
         }
 
         if(self.TimaOverflowOccured and self.OverflowCounter == 4){
-                self.OverflowCounter = 0;
-                self.TimaOverflowOccured = false;
-                self.TIMA.set(self.TMA.get());
+            self.OverflowCounter = 0;
+            self.TimaOverflowOccured = false;
+            self.TIMA.set(self.TMA.get());
 
-                // Request Timer interrupt (bit 2)
-                self.Emu.cpu.regs.IF.setBit(2, 1);
+            // Request Timer interrupt (bit 2)
+            self.Emu.cpu.regs.IF.setBit(2, 1);
         }
 
 

@@ -67,7 +67,7 @@ pub const PPU = struct {
             .DrawingPixels => {
 
                 if(dots >= 172){
-                    self.DrawScanline2();
+                    self.DrawScanline();
 
                     dots -= 172;
                     self.mode = PPUmodes.HBlank;
@@ -145,6 +145,149 @@ pub const PPU = struct {
                 }
             },
         }
+    }
+
+    fn DrawScanline(self: *PPU) void{
+
+        const LY:u8 = self.regs.ly.get();
+        const WY:u8 = self.regs.wy.get();
+        const WX:u8 = self.regs.wx.get() -% 7;
+        const scx:u8 = self.regs.scx.get();
+        const scy:u8 = self.regs.scy.get();
+        const lcdc = self.regs.lcdc;
+        
+        var BGindexCache : [160]u8 = undefined;
+        var BGAttributeCache : [160]u1 = undefined; // traps the priority of BGB pixels
+
+        var X: u8 = 0;
+        var BitsPlaced:u8 = 0;
+        var windowTileSeen: bool = false;
+
+        while (X < 160) :(X+=BitsPlaced){
+            var tileMap : u16 = 0x9800;
+            var tileData : u16 = 0x9000;
+            var WindowTile : bool = false;  
+            // Set up what maps and tile data to look at
+            if(lcdc.WindowEnable and LY >= WY and X >= WX){
+                windowTileSeen = true;
+                WindowTile = true;
+                if(lcdc.WindowTileMap) tileMap = 0x9C00;
+
+            }
+            if(!WindowTile and lcdc.BGtileMap) tileMap = 0x9C00;
+            if(lcdc.BGWinTileData) tileData = 0x8000;
+
+            // initalize our Y and X position
+            var y:u8 = 0;
+            var x:u8 = X;
+
+            if(WindowTile) {x -%= WX; y = windowline;} else {x +%= scx; y = scy +% LY;}
+            // Now that we have our coords we can grab out tile index  and attributes
+            const Tile_Attr_Address : u16 = @as(u16,tileMap-0x8000) + (@as(u16,y/8)*32) + (@as(u16,x/8));
+            
+            const BG_Attr : BGMapAtrributes = @bitCast(self.vram.Banks[1][Tile_Attr_Address]);
+            
+
+            const tileIndex: u8 = self.vram.Banks[0][Tile_Attr_Address];
+            
+            const tileOffset: u16 = if (tileData == 0x8000)
+                @as(u16, tileIndex ) * 16 // unsigned
+            else
+                @bitCast(@as(i16, @as(i8, @bitCast(tileIndex))) * 16); // signed, preserve sign when used as offset
+
+            // Calculate yOffset with or without flip
+            const yOffset: u16 = if(BG_Attr.Yflip and self.Emu.CGBMode) (7-(y&7))*2 else (y&7)*2;
+            // Lastly calculate final address using tile datat tileoffset and yoffset
+            const BG_Address : u16 = @as(u16,tileData - 0x8000) +% tileOffset +% yOffset;
+
+            const BGLo: u8 = self.vram.Banks[if(self.Emu.CGBMode) BG_Attr.Bank else 0][BG_Address];
+            const BGHi: u8 = self.vram.Banks[if(self.Emu.CGBMode) BG_Attr.Bank else 0][BG_Address + 1];
+
+            const BGPallete = self.pmem.grabPalette(if(self.Emu.CGBMode) BG_Attr.ColorPalette else 0, true); 
+
+            BitsPlaced = 0;
+            var offset: u8 = x&7;
+            while (offset < 8) :(offset += 1) {
+                
+                if (X + offset > 159) break; // clamps end
+
+                const BGLoBit :u8 = (BGLo >> if(BG_Attr.XFlip and self.Emu.CGBMode) @truncate(offset) else @truncate(7-offset)) & 1;
+                const BGHiBit :u8 = (BGHi >> if(BG_Attr.XFlip and self.Emu.CGBMode) @truncate(offset) else @truncate(7-offset)) & 1;
+                const BGindex : u8 = (BGHiBit << 1) | BGLoBit;
+
+                BGindexCache[X+BitsPlaced] = BGindex;
+                BGAttributeCache[X+BitsPlaced] = BG_Attr.Priority;
+                // we can do cach here and then save to write later hmmmm
+
+                self.LCD.PlacePixel(X + BitsPlaced, LY, BGPallete[BGindex]);
+                
+                // these bits will be added to X on next cycle
+                BitsPlaced += 1;
+            }
+
+        }   
+        
+        // // check if sprites are enabled
+        if(!lcdc.OBJenable) return;
+
+        // // Now We Render Sprites
+        var Sprite: OAMEntry = undefined;
+        for(self.sprites) |spr|{
+            if(spr == 0xFF) continue;
+            Sprite = self.oam.Entries[spr];
+
+            const SpriteHeight :u8 = if(lcdc.OBJsize) 16 else 8;
+            const SpriteY:u8 = if(Sprite.YFlip) (SpriteHeight-1) - (LY + 16 - Sprite.Y) else (LY + 16 - Sprite.Y);
+            const SpriteX:i16 = @as(i16,@intCast(Sprite.X)) - 8;
+
+            const SpriteLo:u8 = self.vram.Banks[if(self.Emu.CGBMode) Sprite.Bank_No else 0][(@as(u32,(Sprite.tile))*16) + @as(u32,SpriteY) * 2];
+            const SpriteHi:u8 = self.vram.Banks[if(self.Emu.CGBMode) Sprite.Bank_No else 0][(@as(u32,(Sprite.tile))*16) + @as(u32,SpriteY) * 2 + 1]; 
+            const OBJPalette = self.pmem.grabPalette(if(self.Emu.CGBMode) Sprite.CGB_Palette else @as(u3,Sprite.Palette), false);
+        
+            for(0..8) |offset|{
+                
+                // clamp th edges
+                const signedOffset:i16 = @intCast(offset); 
+                if(SpriteX + signedOffset < 0) continue
+                else if (SpriteX + signedOffset > 159) break;
+
+                const CurrentX : u8 = @intCast(SpriteX + signedOffset);
+
+                const SpriteLoBit :u8 = (SpriteLo >> if(Sprite.XFlip) @truncate(offset) else @truncate(7 - offset)) & 1;
+                const SpriteHiBit :u8 = (SpriteHi >> if(Sprite.XFlip) @truncate(offset) else @truncate(7 - offset)) & 1;
+                const OBJIndex:u8 = (SpriteHiBit << 1 | SpriteLoBit);
+
+                if(self.Emu.CGBMode){
+                    const ProrityBitmap :u3 = ((@as(u3,lcdc.BGWindowPriority)<<2)|(@as(u3,Sprite.Priority)<<1)|@as(u3,BGAttributeCache[CurrentX]));
+
+                    const BGPriority:bool = switch (ProrityBitmap) {
+                        0b101 => (BGindexCache[CurrentX] != 0), // if BG color is 1-3 OBJ priority is false
+                        0b110 => (BGindexCache[CurrentX] != 0),
+                        0b111 => (BGindexCache[CurrentX] != 0),
+                        else => false, // OBJ Wins
+                    };
+
+                    if(!BGPriority and OBJIndex != 0) self.LCD.PlacePixel(CurrentX, LY, OBJPalette[OBJIndex]);
+                }else{
+                    if(OBJIndex != 0x00){
+
+                        if(Sprite.Priority == 1){
+
+                            if(BGindexCache[CurrentX] == 0x00){
+                                self.LCD.PlacePixel(CurrentX, LY, OBJPalette[OBJIndex]); 
+                            }
+                        }
+                        else{
+                            self.LCD.PlacePixel(CurrentX, LY, OBJPalette[OBJIndex]);
+                        }
+                    }
+                }
+            }
+        }
+
+        if(windowTileSeen){
+            windowline += 1;
+        } 
     }
 
     fn DrawScanline2(self: *PPU)void{
@@ -292,155 +435,6 @@ pub const PPU = struct {
             windowline += 1;
         } 
     }
-
-    // fn DrawScanline(self: *PPU)void{
-
-    //     const LY:u8 = self.regs.ly.get();
-    //     const WY:u8 = self.regs.wy.get();
-    //     const WX:u8 = self.regs.wx.get() -% 7;
-    //     const scx:u8 = self.regs.scx.get();
-    //     const scy:u8 = self.regs.scy.get();
-    //     const lcdc = self.regs.lcdc;
-        
-    //     var BGindexCache : [160]u8 = undefined;
-    //     var BGAttributeCache : [20]BGMapAtrributes = undefined;
-    //     // Here we will do a frist pass for only the background pixels
-    //     var X : u8 = 0;
-    //     var TileX : u8 = 0;
-    //     while(X < 160): (X += 8-TileX){
-    //         // Set up what maps and tile data to look at
-    //         var tileMap : u16 = 0x9800;
-    //         var tileData : u16 = 0x9000;
-    //         var WindowTile : bool = false;  
-    //         if(lcdc.WindowEnable){
-
-    //             if(LY >= WY and X+7 >= self.regs.wx.get()) {
-    //                 WindowTile = true;
-    //                 if(lcdc.WindowTileMap) tileMap = 0x9C00;
-    //             }
-    //         }
-
-    //         if(!WindowTile and lcdc.BGtileMap) tileMap = 0x9C00;
-    //         if(lcdc.BGWinTileData) tileData = 0x8000;
-
-    //         // initalize our Y and X position
-    //         var y:u8 = 0;
-    //         var x:u8 = X;
-
-    //         if(WindowTile) {
-    //             x -%= WX; 
-    //             y = (LY -% WY)&255;
-
-    //         } else {
-    //             x +%= scx; 
-    //             y = scy +% LY;
-    //         }
-
-    //         // Now that we have our coords we can grab out tile index  and attributes
-    //         const Tile_Attr_Address : u16 = @as(u16,tileMap-0x8000) + (@as(u16,y/8)*32) + (@as(u16,x/8));
-            
-    //         const BG_Attr : BGMapAtrributes = @bitCast(self.vram.Banks[1][Tile_Attr_Address]);
-    //         BGAttributeCache[X/8] = BG_Attr;
-
-    //         const tileIndex: u8 = self.vram.Banks[0][Tile_Attr_Address];
-            
-    //         const tileOffset: u16 = if (tileData == 0x8000)
-    //             @as(u16, tileIndex ) * 16 // unsigned
-    //         else
-    //             @bitCast(@as(i16, @as(i8, @bitCast(tileIndex))) * 16); // signed, preserve sign when used as offset
-
-    //         // Calculate yOffset with or without flip
-    //         const yOffset: u16 = if(BG_Attr.Yflip and self.Emu.CGBMode) (7-(y&7))*2 else (y&7)*2;
-    //         // Lastly calculate final address using tile datat tileoffset and yoffset
-    //         const BG_Address : u16 = @as(u16,tileData - 0x8000) +% tileOffset +% yOffset;
-
-    //         const BGLo: u8 = self.vram.Banks[if(self.Emu.CGBMode) BG_Attr.Bank else 0][BG_Address];
-    //         const BGHi: u8 = self.vram.Banks[if(self.Emu.CGBMode) BG_Attr.Bank else 0][BG_Address + 1];
-
-    //         const BGPallete = self.pmem.grabPalette(if(self.Emu.CGBMode) BG_Attr.ColorPalette else 0, true); 
-        
-    //         TileX = x&7;
-
-    //         var bit:u3 = @truncate(TileX);
-    //         while(true){
-
-    //             const BGLoBit :u8 = (BGLo >> if(BG_Attr.XFlip and self.Emu.CGBMode) bit else 7-bit) & 1;
-    //             const BGHiBit :u8 = (BGHi >> if(BG_Attr.XFlip and self.Emu.CGBMode) bit else 7-bit) & 1;
-    //             const BGindex : u8 = (BGHiBit << 1) | BGLoBit;
-
-    //             // If we Out of bound screen finished
-    //             if((X + bit) > 159) break;
-
-    //             // used for sprites later on
-    //             BGindexCache[X+bit - TileX] = BGindex;
-    //             // Lets set The bit initially to BG color
-    //             self.LCD.PlacePixel(X+bit-TileX, LY, BGPallete[BGindex]);
-    //             //self.screen[X+bit - TileX][LY] = BGPallete[BGindex];
-
-    //             if(bit == 7) break;
-    //             bit +%= 1;
-    //         }
-    //     }
-
-    //     var X2 : i32 = - 8; // this allows us to see sprites that are halfway off screen
-    //     var Sprite: OAMEntry = undefined;
-    //     while(X2 < 160) : (X2 += 1){
-    //         var i : usize = 0;
-    //         while(i<spriteCount) : (i+=1){
-    //             if(X2+8 == self.oam.Entries[sprites[i]].X){
-
-    //                 Sprite = self.oam.Entries[sprites[i]];
-    //                 const SpriteHeight :u8 = if(lcdc.OBJsize) 16 else 8;
-    //                 const SpriteY = if(Sprite.YFlip) (SpriteHeight-1) - (LY + 16 - Sprite.Y) else (LY + 16 - Sprite.Y);
-
-    //                 const SpriteLo:u8 = self.vram.Banks[if(self.Emu.CGBMode) Sprite.Bank_No else 0][(@as(u32,(Sprite.tile))*16) + @as(u32,SpriteY) * 2];
-    //                 const SpriteHi:u8 = self.vram.Banks[if(self.Emu.CGBMode) Sprite.Bank_No else 0][(@as(u32,(Sprite.tile))*16) + @as(u32,SpriteY) * 2 + 1]; 
-    //                 const OBJPalette = self.pmem.grabPalette(if(self.Emu.CGBMode) Sprite.CGB_Palette else @as(u3,Sprite.Palette), false);
-                    
-    //                 const end:i32 = if (X2 + 8 > 159) 160-X2 else 8; // clamps right side of screen
-    //                 var offset:u4 = 0;
-
-    //                 while (offset < end): (offset += 1){
-    //                     if(X2+@as(i32,@intCast(offset)) < 0) continue else X = @intCast(X2 + @as(i32,@intCast(offset))) ;// offscreen
-
-    //                     const SpriteLoBit :u8 = (SpriteLo >> if(Sprite.XFlip) @truncate(offset) else @truncate(7 - offset)) & 1;
-    //                     const SpriteHiBit :u8 = (SpriteHi >> if(Sprite.XFlip) @truncate(offset) else @truncate(7 - offset)) & 1;
-    //                     const OBJIndex:u8 = (SpriteHiBit << 1 | SpriteLoBit);
-
-    //                     if(self.Emu.CGBMode){
-    //                         const ProrityBitmap :u3 = ((@as(u3,lcdc.BGWindowPriority)<<2)|(@as(u3,Sprite.Priority)<<1)|@as(u3,BGAttributeCache[X/8].Priority));
-
-    //                         const BGPriority:bool = switch (ProrityBitmap) {
-    //                             0b101 => (BGindexCache[X] != 0), // if BG color is 1-3 OBJ priority is false
-    //                             0b110 => (BGindexCache[X] != 0),
-    //                             0b111 => (BGindexCache[X] != 0),
-    //                             else => false, // OBJ Wins
-    //                         };
-
-    //                         if(!BGPriority and OBJIndex != 0) self.LCD.PlacePixel(X, LY, OBJPalette[OBJIndex]); //self.screen[X][LY] = OBJPalette[OBJIndex];
-
-    //                     }else{
-    //                         if(OBJIndex != 0x00){
-
-    //                             if(Sprite.Priority == 1){
-
-    //                                 if(BGindexCache[X] == 0x00){
-    //                                     self.LCD.PlacePixel(X, LY, OBJPalette[OBJIndex]);
-    //                                     //self.screen[X][LY] = OBJPalette[OBJIndex]; 
-    //                                 }
-    //                             }
-    //                             else{
-    //                                 self.LCD.PlacePixel(X, LY, OBJPalette[OBJIndex]);
-    //                                 //self.screen[X][LY] = OBJPalette[OBJIndex];
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
 
     pub fn read(self : *PPU, address: u16) u8{
 
@@ -786,345 +780,6 @@ const PPUmodes = enum(u2) {
     DrawingPixels, // mode 3
 };
 
-const PixelFetcher = struct {
 
-    ppu : *PPU,
-
-    // BG-Window Vars
-    BGFIFO : FIFO,
-    BGmode : mode = .GetTile,
-
-    tileMap : u16 = 0x9800,
-    tileData : u16 = 0x9000,
-
-    BGTileCounter : u8 = 0,
-    WindowLineCounter : u8 = 0,
-
-    tileX : u8 = undefined, // used for first tile so we dont push offscreen tiles 
-
-    BGTileAddress : u16 = undefined,
-    BGAttributes : BGMapAtrributes,
-    BGLo : u8 = undefined,
-    BGHi : u8 = undefined,
-
-    // first tile fetch discards it
-    firstTile : bool = true,
-
-    //SpriteVars
-    OBFIFO : FIFO,
-    OBmode : mode = .GetTile,
-
-    SpriteHeight: u8 = undefined,
-    SpriteY:u8 = undefined,
-    OBLo : u8 = undefined,
-    OBHi : u8 = undefined,
-
-    SpriteFetchOn: bool = false,
-
-    CurSprite : OAMEntry = undefined,
-
-    // General Vars
-
-    PixelX : u8 = 0, // increments when we pop a pixel
-
-    pub fn init(parent: *PPU,gpa :std.mem.Allocator)PixelFetcher{
-
-        return PixelFetcher{
-            .ppu = parent,
-            .BGFIFO = .init(gpa),
-            .OBFIFO = .init(gpa),
-        };
-    }
-
-    pub fn ScanlineReset(self: *PixelFetcher) void{
-        self.firstTile = true;
-        self.PixelX = 0;
-
-        // clear left over pixels
-        self.BGFIFO.flush();
-        self.OBFIFO.flush();
-    }
-
-    fn CheckSprites(self: *PixelFetcher)void{
-        for(0..self.ppu.spriteCount) |spr|{
-            if(self.ppu.sprites[spr] != 0xFF){
-                if(self.ppu.oam.Entries[self.ppu.sprites[spr]].X <= self.PixelX){
-                    self.CurSprite = self.ppu.oam.Entries[self.ppu.sprites[spr]];
-                    self.ppu.sprites[spr] = 0xFF; // notfify that this sprite has been seen
-                    self.BGmode = .GetTile;
-                    self.OBmode = .GetTile;
-                    self.SpriteFetchOn = true;
-                }
-            }
-        }
-    }
-
-    // returns true when  we have reached the end of the screen
-    pub fn tick(self : *PixelFetcher, dots : u32) bool{
-
-        if(!self.SpriteFetchOn) self.CheckSprites();
-
-        switch (self.OBmode) {
-            .GetTile => {
-                // already have tile in sprite attributes
-                if(dots&3 != 0) return false;
-                self.OBmode = .GetTileLo;
-            },
-            .GetTileLo =>{
-                if(dots&3 != 0) return false;
-
-                self.SpriteHeight = if(self.ppu.regs.lcdc.OBJsize) 16 else 8;
-                const LY = self.ppu.regs.ly.get();
-                self.SpriteY = if(self.CurSprite.YFlip) (self.SpriteHeight-1) - (LY + 16 - self.CurSprite.Y) else (LY + 16 - self.CurSprite.Y);
-
-                self.OBLo = self.vram.Banks[if(self.Emu.CGBMode) self.CurSprite.Bank_No else 0][(@as(u32,(self.CurSprite.tile))*16) + @as(u32,self.SpriteY) * 2];
-                self.OBmode = .GetTileHi;
-            },
-            .GetTileHi =>{
-                if(dots&3 != 0) return false;
-                self.OBHi = self.vram.Banks[if(self.Emu.CGBMode) self.CurSprite.Bank_No else 0][(@as(u32,(self.CurSprite.tile))*16) + @as(u32,self.SpriteY) * 2 + 1];
-                
-                self.OBmode = .push;
-                self.CheckSprites(); // one last check
-            },
-            .push =>{
-                
-                const currentBit = if(self.CurSprite.X < 8) 8-self.CurSprite.X else 0;
-                for(currentBit..8) |offset|{
-
-                    if(self.PixelX + offset > 159) break; // clamp end
-                    if(offset <= self.BGFIFO.len) continue; // discard pixel if that slot is already full
-                    const SpriteLoBit :u8 = (self.OBLo >> if(self.CurSprite.XFlip) @truncate(offset) else @truncate(7 - offset)) & 1;
-                    const SpriteHiBit :u8 = (self.OBLo >> if(self.CurSprite.XFlip) @truncate(offset) else @truncate(7 - offset)) & 1;
-                    const OBJIndex:u8 = (SpriteHiBit << 1 | SpriteLoBit);
-
-                    self.OBFIFO.enqueue(
-                        Pixel{
-                            .color = @truncate(OBJIndex),
-                            .palette = if(self.ppu.Emu.CGBMode) self.CurSprite.CGB_Palette else @intCast(self.CurSprite.Palette),
-                            .priority = self.CurSprite.Priority,
-                        }
-                    );
-
-                }
-                self.SpriteFetchOn = false;
-                self.OBmode = .GetTile;
-            },
-
-        }
-        switch (self.BGmode) {
-            .GetTile => {
-                const LY:u8 = self.regs.ly.get();
-                const WY:u8 = self.regs.wy.get();
-                const WX:u8 = self.regs.wx.get() -% 7;
-                const scx:u8 = self.regs.scx.get();
-                const scy:u8 = self.regs.scy.get();
-
-                const lcdc = self.ppu.regs.lcdc; 
-
-                var WindowTile:bool = false;
-                    // Set up what maps and tile data to look at
-                if(lcdc.WindowEnable and LY >= WY and self.PixelX >= WX){
-                    WindowTile = true;
-                    if(lcdc.WindowTileMap) self.tileMap = 0x9C00;
-
-                }
-                if(!WindowTile and lcdc.BGtileMap) self.tileMap = 0x9C00;
-                if(lcdc.BGWinTileData) self.tileData = 0x8000;
-
-                // initalize our Shifted Y and X position
-                var y:u8 = 0;
-                var x:u8 = self.PixelX;
-
-                if(WindowTile) {x -%= WX; y = self.WindowLineCounter;} else {x +%= scx; y = scy +% LY;}
-                //save x for push 
-                self.tileX = x&7;
-                // Now that we have our coords we can grab out tile index  and attributes
-                const Tile_Attr_Address : u16 = @as(u16,self.tileMap-0x8000) + (@as(u16,y/8)*32) + (@as(u16,x/8));
-                
-                self.BGAttributes = @bitCast(self.vram.Banks[1][Tile_Attr_Address]);
-                
-                const tileIndex: u8 = self.vram.Banks[0][Tile_Attr_Address];
-                
-                const tileOffset: u16 = if (self.tileData == 0x8000)
-                    @as(u16, tileIndex ) * 16 // unsigned
-                else
-                    @bitCast(@as(i16, @as(i8, @bitCast(tileIndex))) * 16); // signed, preserve sign when used as offset
-
-                // Calculate yOffset with or without flip
-                const yOffset: u16 = if(self.BGAttributes.Yflip and self.Emu.CGBMode) (7-(y&7))*2 else (y&7)*2;
-                self.BGTileAddress = @as(u16,self.tileData - 0x8000) +% tileOffset +% yOffset;
-                self.BGmode = .GetTileLo;
-            },
-            .GetTileLo =>{
-                self.BGLo = self.vram.Banks[if(self.Emu.CGBMode) self.BGAttributes.Bank else 0][self.BGTileAddress];
-                self.BGmode = .GetTileHi;
-            },
-            .GetTileHi =>{
-                self.BGHi = self.vram.Banks[if(self.Emu.CGBMode) self.BGAttributes.Bank else 0][self.BGTileAddress + 1];
-                self.BGmode = .push;
-            },
-            .push => blk :{
-
-                if(self.BGFIFO.len != 0) break :blk; // if FIFO not empty dont push
-                
-                for(self.tileX..8) |offset|{
-
-                    if(self.PixelX + offset > 159) break :blk; // clamps tiles to 
-
-                    const BGLoBit :u8 = (self.BGLo >> if(self.BGAttributes.XFlip and self.ppu.Emu.CGBMode) @intCast(offset) else @intCast(7-offset)) & 1;
-                    const BGHiBit :u8 = (self.BGHi >> if(self.BGAttributes.XFlip and self.ppu.Emu.CGBMode) @intCast(offset) else @intCast(7-offset)) & 1;
-                    const BGindex : u8 = (BGHiBit << 1) | BGLoBit;
-                    
-                    self.BGFIFO.enqueue(
-                        .{
-                            .color = @truncate(BGindex),
-                            .palette = if(self.ppu.Emu.CGBMode) self.BGAttributes.ColorPalette else 0,
-                            .priority = self.BGAttributes.Priority,
-                        }
-                    );
-                }
-
-                self.BGmode = .GetTile;
-                break :blk;
-            },
-        }
-
-        // here we pop pixels to screen
-        // only does anything if there is BG pixels
-        if(self.BGFIFO.dequeue()) |bgPix|{
-
-            const BGpallete = self.ppu.pmem.grabPalette(bgPix.palette, true);
-
-            if(self.OBFIFO.dequeue()) |obPix|{
-                const OBpalette = self.ppu.pmem.grabPalette(obPix.palette, false);
-                if(self.ppu.Emu.CGBMode){
-
-                    const PrioBitmap = (@as(u3,self.ppu.regs.lcdc.BGWindowPriority) << 2) | (@as(u3,obPix.priority) << 1) | (@as(u3,bgPix.priority));
-                    const BGPriority:bool = switch (PrioBitmap) {
-                        0b101 => (BGpallete[bgPix.color] != 0), // if BG color is 1-3 OBJ priority is false
-                        0b110 => (BGpallete[bgPix.color] != 0),
-                        0b111 => (BGpallete[bgPix.color] != 0),
-                        else => false, // OBJ Wins
-                    };
-
-                    if(!BGPriority and obPix.color != 0) self.LCD.PlacePixel(self.PixelX, self.ppu.regs.ly.get(), OBpalette[obPix.color]);
-
-                }else{
-                    if(obPix.color != 0x00){
-
-                        if(obPix.priority == 1){
-
-                            if(bgPix.color == 0x00){
-                                self.LCD.PlacePixel(self.PixelX, self.ppu.regs.ly.get(), OBpalette[obPix.color]);
-                            }
-                        }
-                        else{
-                            self.LCD.PlacePixel(self.PixelX, self.ppu.regs.ly.get(), OBpalette[obPix.color]);
-                        }
-                    }
-                }
-
-            }else{
-                self.ppu.LCD.PlacePixel(self.PixelX, self.ppu.regs.ly.get(), BGpallete[bgPix.color]);
-            }
-
-            // increment our Pixel Position
-            self.PixelX += 1;
-            if(self.PixelX == 160) return true;
-        }
-        return false;
-    }
-
-    const mode = enum {
-        GetTile,
-        GetTileLo,
-        GetTileHi,
-        push,
-    };
-
-};
-
-// essentially a queue
-const FIFO = struct {
-    const Node = struct {
-        data : Pixel,
-        next : ?*Node,
-    };
-
-    gpa : std.mem.Allocator,
-    start : ?*Node,
-    end : ?*Node,
-    len :u8 = 0,
-
-    pub fn init(gpa:std.mem.Allocator) FIFO{
-
-        return FIFO{
-            .gpa = gpa,
-            .start = null,
-            .end = null,
-        };
-    }
-    pub fn enqueue(self: *FIFO, value : Pixel) !void{
-        const node = try self.gpa.create(Node);
-        node.* = .{.data = value, .next = null};
-        if(self.end) |end| end.next = node
-        else self.start = node;
-        self.end = node;
-        self.len += 1;
-    }
-    pub fn dequeue(self: *FIFO) ?Pixel{
-        const start = self.start orelse return null;
-        defer self.gpa.destroy(start);
-        if(start.next) |next|{
-            self.start = next;
-        }else{
-            self.start = null;
-            self.end = null;
-        }
-        self.len -= 1;
-        return start.data;
-
-    }  
-
-    // Dequeue until empty to deinitalize the Pixels
-    pub fn flush(self : *FIFO)void{
-        while(self.dequeue()) |pix|{
-            _ = pix;
-        }
-    }
-};
-
-const Pixel = struct {
-    color : u2,
-    palette: u3,
-    priority : u1,
-};
-
-test "FIFO"{
-    var MyFetcher = PixelFetcher{
-        .BGFIFO = .init(std.testing.allocator),
-        .OBFIFO = .init(std.testing.allocator),
-    };
-
-   try MyFetcher.BGFIFO.enqueue(.{
-    .color = 5,
-    .palette = 10,
-    .priority = 1,
-   });
-
-    try MyFetcher.BGFIFO.enqueue(.{
-    .color = 1,
-    .palette = 15,
-    .priority = 0,
-   });
-
-    const myPixel : Pixel = MyFetcher.BGFIFO.dequeue() orelse Pixel{.color = 1,.palette = 1,.priority = 1};
-
-    std.debug.print("Pixel Data :{x} {x} {x}\n", .{myPixel.color,myPixel.palette,myPixel.priority});
-    const myPixel2 : Pixel = MyFetcher.BGFIFO.dequeue() orelse Pixel{.color = 1,.palette = 1,.priority = 1};
-
-    std.debug.print("Pixel Data :{x} {x} {x}", .{myPixel2.color,myPixel2.palette,myPixel2.priority});
-}
 
 

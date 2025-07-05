@@ -43,14 +43,18 @@ pub const GUI = struct {
     // This Function Runs te GUI and controlls the GBC
     pub fn Run(self : *GUI) !void{
 
-        try self.loadRom("Roms/Pokemon - Yellow Version (USA, Europe).gbc");
+        //try self.loadRom("Roms/Pokemon - Yellow Version (USA, Europe).gbc");
         //try self.loadRom("Roms/Pokemon - Crystal Version (USA, Europe) (Rev A).gbc");
         //try self.loadRom("Roms/Pokemon Red (UE) [S][!].gb");
         //try self.loadRom("Roms/Pokemon - Silver Version (UE) [C][!].gbc");
-        //try self.loadRom("Roms/Legend of Zelda, The - Link's Awakening DX (USA, Europe).gbc");
+        try self.loadRom("Roms/Legend of Zelda, The - Link's Awakening DX (USA, Europe).gbc");
         //try self.loadRom("Roms/Legend of Zelda, The - Oracle of Ages (USA).gbc");
         //try self.loadRom("Roms/Dragon Warrior III (U) [C][!].gbc");
-        //try self.loadRom("Roms/interrupt_time.gb");
+        //try self.loadRom("Roms/Dragon Quest Monsters (G) [C][!].gbc");
+        //try self.loadRom("Roms/Harvest Moon GB (U) [C][!].gbc");
+
+        //try self.loadRom("Roms/Super Mario Bros. Deluxe (USA, Europe).gbc");
+        //try self.loadRom("Roms/interrupt_time.gb"); // Wierd infinite loop
 
         // Color Tests
 
@@ -62,7 +66,6 @@ pub const GUI = struct {
         //try self.loadRom("Roms/mbc_oob_sram_mbc5.gbc");
         //try self.loadRom("Roms/ppu_disabled_state.gbc"); //passed
 
-        //c.SDL_ShowOpenFileDialog(SDL_DialogFileCallback callback, void *userdata, SDL_Window *window, const SDL_DialogFileFilter *filters, int nfilters, const char *default_location, bool allow_many);
         while(!quit){
             
             if(self.gbc) |ZBC|{
@@ -256,14 +259,3 @@ pub const GUI = struct {
         }
     }
 };
-
-test "Check CGB Mode" {
-    var Zigboy = GBC{};
-    try Zigboy.init("C:/Users/reece/Documents/Coding/Repos/ZigBoyColor/Roms/02-interrupts.gb");
-
-    std.debug.print("CGB Mode : {}", .{Zigboy.CGBMode});
-    try std.testing.expect(Zigboy.CGBMode);
-
-
-    Zigboy.deinit();
-}
