@@ -47,7 +47,7 @@ pub const GUI = struct {
         //try self.loadRom("Roms/Pokemon - Crystal Version (USA, Europe) (Rev A).gbc");
         //try self.loadRom("Roms/Pokemon Red (UE) [S][!].gb");
         //try self.loadRom("Roms/Pokemon - Silver Version (UE) [C][!].gbc");
-        try self.loadRom("Roms/Legend of Zelda, The - Link's Awakening DX (USA, Europe).gbc");
+        //try self.loadRom("Roms/Legend of Zelda, The - Link's Awakening DX (USA, Europe).gbc");
         //try self.loadRom("Roms/Legend of Zelda, The - Oracle of Ages (USA).gbc");
         //try self.loadRom("Roms/Dragon Warrior III (U) [C][!].gbc");
         //try self.loadRom("Roms/Dragon Quest Monsters (G) [C][!].gbc");
@@ -55,6 +55,7 @@ pub const GUI = struct {
 
         //try self.loadRom("Roms/Super Mario Bros. Deluxe (USA, Europe).gbc");
         //try self.loadRom("Roms/interrupt_time.gb"); // Wierd infinite loop
+        //try self.loadRom("Roms/Wario Land 3 (World) (En,Ja).gbc");
 
         // Color Tests
 
@@ -65,6 +66,7 @@ pub const GUI = struct {
         //try self.loadRom("Roms/mbc_oob_sram_mbc3.gbc");
         //try self.loadRom("Roms/mbc_oob_sram_mbc5.gbc");
         //try self.loadRom("Roms/ppu_disabled_state.gbc"); //passed
+
 
         while(!quit){
             

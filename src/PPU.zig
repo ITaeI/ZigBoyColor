@@ -17,7 +17,7 @@ pub const PPU = struct {
     regs : Registers,
     mode : PPUmodes = PPUmodes.OAMScan,
 
-    sprites : [10]usize = .{0xFF}**10,
+    sprites : [10]usize = .{0}**10,
     spriteCount : usize = 0,
 
     var dots: u32 = 0;
@@ -58,7 +58,7 @@ pub const PPU = struct {
 
                 if(dots >= 80)
                 {
-                    if(self.Emu.CGBMode) self.scanOAMCGB() else self.scanOAMDMG(); // scans the oam 
+                    self.scanOAM(); // scans the oam 
                     dots -= 80;
                     self.mode = PPUmodes.DrawingPixels;
                     self.regs.stat.PPUmode = self.mode;
@@ -232,9 +232,12 @@ pub const PPU = struct {
 
         // // Now We Render Sprites
         var Sprite: OAMEntry = undefined;
-        for(self.sprites) |spr|{
-            if(spr == 0xFF) continue;
-            Sprite = self.oam.Entries[spr];
+
+        var spr:usize = 0;
+        while(spr < self.spriteCount) :(spr+=1){
+
+            const entry = self.sprites[if(self.Emu.CGBMode) self.spriteCount-1-spr else spr];
+            Sprite = self.oam.Entries[entry];
 
             const SpriteHeight :u8 = if(lcdc.OBJsize) 16 else 8;
             const SpriteY:u8 = if(Sprite.YFlip) (SpriteHeight-1) - (LY + 16 - Sprite.Y) else (LY + 16 - Sprite.Y);
@@ -500,48 +503,21 @@ pub const PPU = struct {
         }
     }
 
-    fn scanOAMCGB(self: *PPU) void {
-        const ly : i16 = @intCast(self.regs.ly.get());
-        const objHeight : i16 = if(self.regs.lcdc.OBJsize) 16 else 8;
-
-        for(0..self.spriteCount) |sprite|{
-            self.sprites[sprite] = 0xFF;
-        }
-        self.spriteCount = 0;
-
-        var iter : i16 = 39;
-        while (iter > -1) : (iter -= 1) {
-            const entry = self.oam.Entries[@intCast(iter)];
-            if(entry.Y < 1 or entry.Y > 159) continue; // if sprite is hidden no use checking it
-
-    
-            const SpriteY : i16 = @as(i16,@intCast(entry.Y)) - 16;
-            if(ly >= SpriteY and ly < SpriteY + objHeight){
-                self.sprites[self.spriteCount] = @intCast(iter);
-                self.spriteCount += 1;
-            }
-
-            if(self.spriteCount == 10){
-                return;
-            }
-        }
-    }
-
-    fn scanOAMDMG(self : *PPU) void {
+    fn scanOAM(self : *PPU) void {
 
         const ly : u8 = self.regs.ly.get();
         const ObjHeight: u8 = if(self.regs.lcdc.OBJsize) 16 else 8;
 
         // clear past sprites
         for(0..self.spriteCount)|i|{
-            self.sprites[i] = 0xFF;
+            self.sprites[i] = 0;
         }
         self.spriteCount = 0;
 
         // grab the indexes for visible sprites
         for(self.oam.Entries,0..) |entry,i|{
             
-            if(entry.X != 0 and ly + 16 >= entry.Y and ly + 16 <= entry.Y + ObjHeight - 1){
+            if(ly + 16 >= entry.Y and ly + 16 < entry.Y + ObjHeight){
                 self.sprites[self.spriteCount] = i;
                 self.spriteCount += 1;
             }
@@ -555,7 +531,7 @@ pub const PPU = struct {
     fn compareLY_LYC (self: *PPU) void{
 
         self.regs.stat.LYCeqlLY = self.regs.ly.get() == self.regs.lyc.get();
-        if(self.regs.stat.LYCeqlLY){
+        if(self.regs.stat.LYCeqlLY and self.regs.stat.LYCInt){
             // set LCD interrupt to true in the cpu
             self.Emu.cpu.regs.IF.setBit(1, 1);
         }

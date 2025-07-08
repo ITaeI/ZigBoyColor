@@ -62,6 +62,7 @@ pub const DMA = struct {
         if((PrevMode == .Hblank and PrevActivity) and self.HDMA5.TransferMode == .GeneralPurpose){
             self.VRAMTransferInProgress = false;
         }
+        self.GeneralPurpose();
     }
 
     pub fn StartOAMTransfer(self: *DMA, AddressHi : u8) void{

@@ -31,6 +31,7 @@ pub const GBC = struct {
 
     // Double speed variables
     DoubleSpeed : KEY1 = @bitCast(@as(u8,0x7E)),
+    SwapState: bool = false,
 
     ticks : u64 = 0,
     pub fn init(self: *GBC, parentPtr: *GUI, Rom: []const u8) !void{
@@ -79,8 +80,7 @@ pub const GBC = struct {
 
             self.ticks += 1;
         }
-        // vram dma (not affected by double speed as it is a single data transfer)
-        self.dma.GeneralPurpose();
+
         // oam dma
         self.dma.oamTick();
 
@@ -92,6 +92,18 @@ pub const GBC = struct {
             self.cart.TimerTick();
             self.ticks = 0;
         }
+    }
+
+    pub fn SwapSpeed(self : *GBC)void{
+        // for 2050 M cycles after speed swap the cpu stops
+        // div does not tick, and ppu does odd stuff we can ignore
+        self.SwapState = true;
+        for(0..2050) |_|{
+            self.cycle();
+        }
+        self.SwapState = false;
+        self.DoubleSpeed.Active = !self.DoubleSpeed.Active;
+        self.DoubleSpeed.Armed = false;
     }
 };
 

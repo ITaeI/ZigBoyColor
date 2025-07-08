@@ -2336,15 +2336,13 @@ fn STOP(cpu: *SM83, _ : Op, _ : Op) void
         //DIV reset
         cpu.Emu.timer.DIV.set(0);
         // Speed chages
-        cpu.Emu.DoubleSpeed.Active = !cpu.Emu.DoubleSpeed.Active;
-        cpu.Emu.DoubleSpeed.Armed = false;
+        cpu.Emu.SwapSpeed();
     }else if(!cpu.IME){
         unreachable;
     }else{
         cpu.Emu.timer.DIV.set(0);
         // Speed changes
-        cpu.Emu.DoubleSpeed.Active = !cpu.Emu.DoubleSpeed.Active;
-        cpu.Emu.DoubleSpeed.Armed = false;   
+        cpu.Emu.SwapSpeed();
     }   
 }
 
@@ -2367,6 +2365,5 @@ fn NOP(_: *SM83, _ : Op, _ : Op) void
 {
     //nothing
 }
-
 
 

@@ -32,7 +32,7 @@ pub const Timer = struct {
     pub fn tick(self : *Timer) void{
 
         const DivPrev : u16 = self.DIV.get();
-        self.DIV.Inc();
+        if(!self.Emu.SwapState) self.DIV.Inc();
         var FallingEdge : bool = false;
 
         if(self.DIV.hi.getBit(4) != 1 and DivPrev >> 12 != 0){
