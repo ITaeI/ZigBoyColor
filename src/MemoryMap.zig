@@ -227,7 +227,7 @@ const JoyPad = struct {
 
     }
 
-    pub fn releaseKey(self : *JoyPad, comptime bit : u3)void{
+    pub fn releaseKey(self : *JoyPad, bit : u3)void{
         self.state |= (@as(u8,(1)) << bit);
     }
 };

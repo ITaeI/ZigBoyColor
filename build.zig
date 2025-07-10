@@ -4,25 +4,29 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const Mod = b.createModule(.{
+    // Dependency
+    const raylib_dep = b.dependency("raylib_zig", .{
+        .target = target,
+        .optimize = optimize,
+    }); 
+
+    // grab our modules and artifact
+    const raylib = raylib_dep.module("raylib");
+    const raygui = raylib_dep.module("raygui");
+    const raylibArt = raylib_dep.artifact("raylib");
+
+    // Create Executable
+    const exe = b.addExecutable(.{
+        .name = "ZigBoyColor",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    const sdl_dep = b.dependency("sdl", .{
-        .target = target,
-        .optimize = optimize,
-    });
+    exe.linkLibrary(raylibArt);
 
-    const sdl_lib = sdl_dep.artifact("SDL3");
-
-    Mod.linkLibrary(sdl_lib);
-
-    const exe = b.addExecutable(.{
-        .name = "ZigBoyColor",
-        .root_module = Mod,
-    });
+    exe.root_module.addImport("raylib", raylib);
+    exe.root_module.addImport("raygui", raygui);
 
     b.installArtifact(exe);
 
