@@ -110,43 +110,83 @@ pub const SM83 = struct {
 
     }
 
+    // fn InterruptHandler(self: *SM83) void{
+
+    //     var IntVector: u16 = 0x40;
+    //     const cmp : u8 = (self.regs.IE.get() & self.regs.IF.get())&0x1F;
+    //     // check leading zeros to find which interrupt to service
+    //     const zct: u3 = @truncate(@ctz(cmp | 0x80)); 
+
+    //     if(zct < 5){
+    //         self.isHalted = false;
+    //         if(self.dmaWasActive){
+    //             self.Emu.dma.VRAMTransferInProgress = self.dmaWasActive;
+    //             self.dmaWasActive = false;
+    //         }
+    //         self.Emu.cycle();
+    //         self.Emu.cycle();
+
+    //         // 2 cycles pushing PC to stack
+
+    //         self.regs.sp.Dec();
+    //         self.writeMem(self.regs.sp.get(), @truncate(self.regs.pc >> 8));
+    //         self.regs.sp.Dec();
+    //         self.writeMem(self.regs.sp.get(), @truncate(self.regs.pc));
+            
+    //         self.Emu.cycle();
+
+    //         // 1 last cycle setting new PC value
+    //         IntVector += (8 * @as(u16,zct));
+    //         self.regs.pc = IntVector;
+
+    //         // reset ime flag
+    //         self.IME = false;
+    //         self.IMEWait = false;
+    //         self.IMEWaitCount = 0;
+
+    //         // reset IF flag
+    //         self.regs.IF.setBit(zct, 0);
+    //     }
+    // }
+
     fn InterruptHandler(self: *SM83) void{
 
         var IntVector: u16 = 0x40;
-        const cmp : u8 = (self.regs.IE.get() & self.regs.IF.get())&0x1F;
         // check leading zeros to find which interrupt to service
-        const zct: u3 = @truncate(@ctz(cmp | 0x80)); 
-        //const zct: u3 = @truncate(@ctz(self.regs.IF.get()));
-
+        const zct: u3 = @truncate(@ctz(self.regs.IF.get())); 
         if(zct < 5){
-            self.isHalted = false;
-            if(self.dmaWasActive){
-                self.Emu.dma.VRAMTransferInProgress = self.dmaWasActive;
-                self.dmaWasActive = false;
+            if(self.regs.IE.getBit(zct) == 1 and self.regs.IF.getBit(zct) == 1 ){
+                
+                self.isHalted = false;
+                if(self.dmaWasActive){
+                    self.Emu.dma.VRAMTransferInProgress = self.dmaWasActive;
+                    self.dmaWasActive = false;
+                }
+                self.Emu.cycle();
+                self.Emu.cycle();
+
+                // 2 cycles pushing PC to stack
+
+                self.regs.sp.Dec();
+                self.writeMem(self.regs.sp.get(), @truncate(self.regs.pc >> 8));
+                self.regs.sp.Dec();
+                self.writeMem(self.regs.sp.get(), @truncate(self.regs.pc));
+                
+                self.Emu.cycle();
+
+                // 1 last cycle setting new PC value
+                IntVector += (8 * @as(u16,zct));
+                self.regs.pc = IntVector;
+
+                // reset ime flag
+                self.IME = false;
+                self.IMEWait = false;
+                self.IMEWaitCount = 0;
+
+                // reset IF flag
+                self.regs.IF.setBit(zct, 0);
+
             }
-            self.Emu.cycle();
-            self.Emu.cycle();
-
-            // 2 cycles pushing PC to stack
-
-            self.regs.sp.Dec();
-            self.writeMem(self.regs.sp.get(), @truncate(self.regs.pc >> 8));
-            self.regs.sp.Dec();
-            self.writeMem(self.regs.sp.get(), @truncate(self.regs.pc));
-            
-            self.Emu.cycle();
-
-            // 1 last cycle setting new PC value
-            IntVector += (8 * @as(u16,zct));
-            self.regs.pc = IntVector;
-
-            // reset ime flag
-            self.IME = false;
-            self.IMEWait = false;
-            self.IMEWaitCount = 0;
-
-            // reset IF flag
-            self.regs.IF.setBit(zct, 0);
         }
     }
 

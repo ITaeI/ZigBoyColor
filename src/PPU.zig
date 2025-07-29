@@ -2,12 +2,12 @@ const std = @import("std");
 const GBC = @import("GBC.zig").GBC;
 const Register = @import("SM83.zig").Register8Bit;
 
-const GUI2 = @import("GUI.zig").GUI2;
+const GUI = @import("GUI.zig").GUI;
 
 
 pub const PPU = struct {
 
-    LCD : *GUI2,
+    LCD : *GUI,
 
     Emu : *GBC,
     vram : VRAM,
@@ -27,7 +27,7 @@ pub const PPU = struct {
     const DotsPerFrame:u32 = 70224;
 
 
-    pub fn init (parentPtr : *GBC, lcd : *GUI2) PPU{
+    pub fn init (parentPtr : *GBC, lcd : *GUI) PPU{
 
         dots = 0;
         windowline = 0;

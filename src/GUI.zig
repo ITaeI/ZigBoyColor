@@ -100,7 +100,7 @@ const GBCPalettes = [_][4]cl.Color{
 const HeaderFontSize = 48;
 const FontSize = 32;
 
-pub const GUI2 = struct {
+pub const GUI = struct {
 
     // Gameboy Color Pointer
     gbc : ?*GBC = null,
@@ -135,7 +135,7 @@ pub const GUI2 = struct {
     gpa : std.heap.GeneralPurposeAllocator(.{}) = std.heap.GeneralPurposeAllocator(.{}).init,
 
 
-    pub fn init(self: *GUI2,Name : [:0]const u8, w:comptime_int,h:comptime_int) !void{
+    pub fn init(self: *GUI,Name : [:0]const u8, w:comptime_int,h:comptime_int) !void{
         
         // Initialize Clay
         self.MinClayMem = cl.minMemorySize();
@@ -170,7 +170,7 @@ pub const GUI2 = struct {
         renderer.raylib_fonts[0] = try rl.loadFont("assets/Tanker-Regular.ttf");
     }   
 
-    pub fn Run(self : *GUI2) !void{
+    pub fn Run(self : *GUI) !void{
 
         while (!rl.windowShouldClose() and !self.Exit) {
 
@@ -193,7 +193,7 @@ pub const GUI2 = struct {
         self.deinit();
     }
 
-    fn DrawGui(self : *GUI2) []cl.RenderCommand{
+    fn DrawGui(self : *GUI) []cl.RenderCommand{
 
         UpdateWindowSize();
         self.UpdateMouse();
@@ -229,7 +229,7 @@ pub const GUI2 = struct {
         return cl.endLayout();
     }
     // Main Content Functions
-    fn Settings(_ : *GUI2)void{
+    fn Settings(_ : *GUI)void{
 
         cl.UI()(.{
             .id = .ID("Settings Page"),
@@ -297,7 +297,7 @@ pub const GUI2 = struct {
         });
     }
 
-    fn GBCscreen(self : *GUI2)void{
+    fn GBCscreen(self : *GUI)void{
 
         cl.UI()(.{
             .id = .ID("GBC"),
@@ -320,7 +320,7 @@ pub const GUI2 = struct {
         });
     }
 
-    fn FilePicker(self : *GUI2) void{
+    fn FilePicker(self : *GUI) void{
 
         cl.UI()(.{
             .id = .ID("SideBar"),
@@ -455,7 +455,7 @@ pub const GUI2 = struct {
 
     }
 
-    fn ChangeDirectory(self : *GUI2, subPath : []const u8) void {
+    fn ChangeDirectory(self : *GUI, subPath : []const u8) void {
 
         self.cwd = blk: {
             if(std.mem.eql(u8, subPath, "..")) {
@@ -490,7 +490,7 @@ pub const GUI2 = struct {
         };
     }
 
-    fn clearFileList(self : *GUI2) void{
+    fn clearFileList(self : *GUI) void{
         self.SelectedRom = "Please Select A Rom";
         for(self.RomList.items) |file|{
             self.gpa.allocator().free(file.name);
@@ -499,7 +499,7 @@ pub const GUI2 = struct {
         self.RomList.clearAndFree();
     }
 
-    fn scanDir(self : *GUI2) !void{
+    fn scanDir(self : *GUI) !void{
 
         self.clearFileList();
 
@@ -520,7 +520,7 @@ pub const GUI2 = struct {
     }
 
     // Tab Bar Functions
-    fn TabBar(self : *GUI2)void {
+    fn TabBar(self : *GUI)void {
 
         cl.UI()(.{
             .id = .ID("TabBar"),
@@ -665,7 +665,7 @@ pub const GUI2 = struct {
         cl.setLayoutDimensions(.{ .h = @floatFromInt(rl.getScreenHeight()) ,.w = @floatFromInt(rl.getScreenWidth()) });
     }
 
-    fn UpdateMouse(self : *GUI2) void{
+    fn UpdateMouse(self : *GUI) void{
         const mouse :rl.Vector2  = rl.getMousePosition();
         const scroll :rl.Vector2 = rl.getMouseWheelMoveV();
         self.MouseClicked = rl.isMouseButtonPressed(.left);
@@ -673,7 +673,7 @@ pub const GUI2 = struct {
         cl.updateScrollContainers(true, cl.Vector2{.x = scroll.x,.y = scroll.y*2},rl.getFrameTime());
     }
 
-    fn checkInputs(self : *GUI2)void{
+    fn checkInputs(self : *GUI)void{
 
         const KeyCodes: [8]rl.KeyboardKey = .{.d,.a,.w,.s,.l,.k,.p,.o};
         for (KeyCodes,0..) |key,i|{
@@ -766,11 +766,11 @@ pub const GUI2 = struct {
         }
             
     }
-    fn checkClickedItem(self : * GUI2, StringID : []const u8) bool {
+    fn checkClickedItem(self : * GUI, StringID : []const u8) bool {
         return cl.pointerOver(cl.getElementId(StringID)) and self.MouseClicked;
     }
 
-    fn loadRom(self :*GUI2) void{
+    fn loadRom(self :*GUI) void{
         
         self.ExitEmulator();
         
@@ -779,7 +779,7 @@ pub const GUI2 = struct {
         self.gbc.?.ppu.pmem.SelectUserPalette(GBPaletteIndex);
     }
 
-    pub fn ExitEmulator(self : *GUI2)void{
+    pub fn ExitEmulator(self : *GUI)void{
 
         if(self.gbc) |gbc|{
             gbc.deinit();
@@ -789,7 +789,7 @@ pub const GUI2 = struct {
 
     }
 
-    pub fn PlacePixel(self : *GUI2, x : u8, y:u8, color : u16) void{
+    pub fn PlacePixel(self : *GUI, x : u8, y:u8, color : u16) void{
         rl.imageDrawPixel(&self.CGBimage, @intCast(x), @intCast(y), 
 
         rl.Color{
@@ -800,7 +800,7 @@ pub const GUI2 = struct {
         });
     }
 
-    fn deinit(self : *GUI2) void {
+    fn deinit(self : *GUI) void {
         // Close Emulator
         self.ExitEmulator();
 

@@ -1,8 +1,8 @@
 const std = @import("std");
-const GUI2 = @import("GUI.zig").GUI2;
+const GUI = @import("GUI.zig").GUI;
 
 pub fn main() !void {
-    var gui = GUI2{};
+    var gui = GUI{};
     try gui.init("ZigBoyColor", 1150, 640);
     try gui.Run();
 }

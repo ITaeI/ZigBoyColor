@@ -6,7 +6,7 @@ const PPU = @import("PPU.zig").PPU;
 const Timer  = @import("Timer.zig").Timer;
 const DMA = @import("DMA.zig").DMA;
 
-const GUI2 = @import("GUI.zig").GUI2;
+const GUI = @import("GUI.zig").GUI;
 
 pub const GBC = struct {
 
@@ -34,7 +34,7 @@ pub const GBC = struct {
     SwapState: bool = false,
 
     ticks : u64 = 0,
-    pub fn init(self: *GBC, parentPtr: *GUI2, Rom: []const u8) !void{
+    pub fn init(self: *GBC, parentPtr: *GUI, Rom: []const u8) !void{
 
         // Here we Initalize the Cartridge and load the rom
         self.cart = Cart{.GBC = self,.alloc = std.heap.page_allocator};
