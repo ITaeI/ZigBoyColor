@@ -4,6 +4,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const clay_dep = b.dependency("zclay",.{
+        .target = target,
+        .optimize = optimize
+    });
+
     // Dependency
     const raylib_dep = b.dependency("raylib_zig", .{
         .target = target,
@@ -12,7 +17,6 @@ pub fn build(b: *std.Build) void {
 
     // grab our modules and artifact
     const raylib = raylib_dep.module("raylib");
-    const raygui = raylib_dep.module("raygui");
     const raylibArt = raylib_dep.artifact("raylib");
 
     // Create Executable
@@ -23,10 +27,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    exe.linkLibrary(raylibArt);
+    exe.root_module.addImport("zclay", clay_dep.module("zclay"));
 
+    exe.linkLibrary(raylibArt);
     exe.root_module.addImport("raylib", raylib);
-    exe.root_module.addImport("raygui", raygui);
 
     b.installArtifact(exe);
 

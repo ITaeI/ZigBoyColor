@@ -40,9 +40,8 @@ pub const SM83 = struct {
         }else self.isStopped = false;
 
         if(!self.isHalted){
-
             // Fetch Opcode
-            var opcode : u8 = self.readMem(self.regs.pc);
+            var opcode : u8 = self.readMem(self.regs.pc,true);
             
             // Halt bug causes pc to not increment
             if(self.HaltBug){
@@ -53,7 +52,7 @@ pub const SM83 = struct {
             // Execute instruction
             if(opcode == 0xCB) 
             {
-                opcode = self.readMem(self.regs.pc);
+                opcode = self.readMem(self.regs.pc,true);
                 const i = self.OpcodeTableCB[opcode];
                 i.handler(self, i.Op1, i.Op2);
 
@@ -114,57 +113,53 @@ pub const SM83 = struct {
     fn InterruptHandler(self: *SM83) void{
 
         var IntVector: u16 = 0x40;
+        const cmp : u8 = (self.regs.IE.get() & self.regs.IF.get())&0x1F;
         // check leading zeros to find which interrupt to service
-        const zct: u3 = @truncate(@ctz(self.regs.IF.get())); 
+        const zct: u3 = @truncate(@ctz(cmp | 0x80)); 
+        //const zct: u3 = @truncate(@ctz(self.regs.IF.get()));
+
         if(zct < 5){
-            if(self.regs.IE.getBit(zct) == 1 and self.regs.IF.getBit(zct) == 1 ){
-                
-                self.isHalted = false;
-                if(self.dmaWasActive){
-                    self.Emu.dma.VRAMTransferInProgress = self.dmaWasActive;
-                    self.dmaWasActive = false;
-                }
-                self.Emu.cycle();
-                self.Emu.cycle();
-
-                // 2 cycles pushing PC to stack
-
-                self.regs.sp.Dec();
-                self.writeMem(self.regs.sp.get(), @truncate(self.regs.pc >> 8));
-                self.regs.sp.Dec();
-                self.writeMem(self.regs.sp.get(), @truncate(self.regs.pc));
-                
-                self.Emu.cycle();
-
-                // 1 last cycle setting new PC value
-                IntVector += (8 * @as(u16,zct));
-                self.regs.pc = IntVector;
-
-                // reset ime flag
-                self.IME = false;
-                self.IMEWait = false;
-                self.IMEWaitCount = 0;
-
-                // reset IF flag
-                self.regs.IF.setBit(zct, 0);
-
+            self.isHalted = false;
+            if(self.dmaWasActive){
+                self.Emu.dma.VRAMTransferInProgress = self.dmaWasActive;
+                self.dmaWasActive = false;
             }
+            self.Emu.cycle();
+            self.Emu.cycle();
+
+            // 2 cycles pushing PC to stack
+
+            self.regs.sp.Dec();
+            self.writeMem(self.regs.sp.get(), @truncate(self.regs.pc >> 8));
+            self.regs.sp.Dec();
+            self.writeMem(self.regs.sp.get(), @truncate(self.regs.pc));
+            
+            self.Emu.cycle();
+
+            // 1 last cycle setting new PC value
+            IntVector += (8 * @as(u16,zct));
+            self.regs.pc = IntVector;
+
+            // reset ime flag
+            self.IME = false;
+            self.IMEWait = false;
+            self.IMEWaitCount = 0;
+
+            // reset IF flag
+            self.regs.IF.setBit(zct, 0);
         }
     }
 
     pub fn fetch16bits(self: *SM83) u16 {
-        const lo = self.readMem(self.regs.pc);
-        const hi = self.readMem(self.regs.pc);
+        const lo = self.readMem(self.regs.pc,true);
+        const hi = self.readMem(self.regs.pc,true);
         return buildAddress(lo, hi);
     }
 
-    pub fn readMem(self: *SM83,address:u16)u8{
+    pub fn readMem(self: *SM83,address:u16, IncPC:bool)u8{
 
         const mem : u8 = self.Emu.bus.read(address);
-        if (address == self.regs.pc)
-        {
-            self.regs.pc +%= 1;
-        }
+        if (IncPC) self.regs.pc +%= 1;
         self.Emu.cycle();
         return mem;
     }
@@ -929,14 +924,14 @@ fn LD_R8_R8(_: *SM83, Dest : Op, Src : Op) void
 // load a 8 bit value into a 8 bit register
 fn LD_R8_u8(cpu: *SM83, Dest : Op, _ : Op) void 
 {
-    const n:u8  = cpu.readMem(cpu.regs.pc);
+    const n:u8  = cpu.readMem(cpu.regs.pc,true);
     Dest.r8.set(n);
 }
 
 // load a 8 bit value from adress HL into a 8 bit register
 fn LD_R8_HL(cpu: *SM83, Dest : Op, _ : Op) void 
 {
-    Dest.r8.set(cpu.readMem(cpu.regs.hl.get()));
+    Dest.r8.set(cpu.readMem(cpu.regs.hl.get(),false));
     
 }
 
@@ -950,7 +945,7 @@ fn LD_HL_R8(cpu: *SM83, Src : Op, _ : Op) void
 // load a u8 value to the adress specified in HL
 fn LD_HL_u8(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.pc);
+    const n : u8 = cpu.readMem(cpu.regs.pc,true);
     cpu.writeMem(cpu.regs.hl.get(), n);
 
     
@@ -959,7 +954,7 @@ fn LD_HL_u8(cpu: *SM83, _ : Op, _ : Op) void
 
 fn LD_A_BC(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.bc.get());
+    const n : u8 = cpu.readMem(cpu.regs.bc.get(),false);
     cpu.regs.af.a.set(n);
 
     
@@ -968,7 +963,7 @@ fn LD_A_BC(cpu: *SM83, _ : Op, _ : Op) void
 
 fn LD_A_DE(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.de.get());
+    const n : u8 = cpu.readMem(cpu.regs.de.get(),false);
     cpu.regs.af.a.set(n);
 
     
@@ -992,7 +987,7 @@ fn LD_DE_A(cpu: *SM83, _ : Op, _ : Op) void
 fn LD_A_u16(cpu: *SM83, _ : Op, _ : Op) void 
 {
     
-    const n : u8 = cpu.readMem(cpu.fetch16bits());
+    const n : u8 = cpu.readMem(cpu.fetch16bits(),false);
     cpu.regs.af.a.set(n);
     
      
@@ -1008,7 +1003,7 @@ fn LD_u16_A(cpu: *SM83, _ : Op, _ : Op) void
 
 fn LDH_A_C(cpu: *SM83, _ : Op, _ : Op) void
 {
-    const n : u8 = cpu.readMem(buildAddress(cpu.regs.bc.lo.get(), 0xFF));
+    const n : u8 = cpu.readMem(buildAddress(cpu.regs.bc.lo.get(), 0xFF),false);
     cpu.regs.af.a.set(n);
     
      
@@ -1023,8 +1018,8 @@ fn LDH_C_A(cpu: *SM83, _ : Op, _ : Op) void
 
 fn LDH_A_u8(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n: u8 = cpu.readMem(cpu.regs.pc);
-    const A: u8 = cpu.readMem(buildAddress(n,0xFF));
+    const n: u8 = cpu.readMem(cpu.regs.pc,true);
+    const A: u8 = cpu.readMem(buildAddress(n,0xFF),false);
     cpu.regs.af.a.set(A);
     
     
@@ -1032,7 +1027,7 @@ fn LDH_A_u8(cpu: *SM83, _ : Op, _ : Op) void
 
 fn LDH_u8_A(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n: u8 = cpu.readMem(cpu.regs.pc);
+    const n: u8 = cpu.readMem(cpu.regs.pc,true);
     cpu.writeMem(buildAddress(n,0xFF), cpu.regs.af.a.get());
     
     
@@ -1040,7 +1035,7 @@ fn LDH_u8_A(cpu: *SM83, _ : Op, _ : Op) void
 // go back to 36
 fn LD_A_HL_DEC(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n: u8 = cpu.readMem(cpu.regs.hl.get());
+    const n: u8 = cpu.readMem(cpu.regs.hl.get(),false);
     cpu.regs.hl.Dec();
     cpu.regs.af.a.set(n);
 
@@ -1058,7 +1053,7 @@ fn LD_HL_DEC_A(cpu: *SM83, _ : Op, _ : Op) void
 
 fn LD_A_HL_INC(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n: u8 = cpu.readMem(cpu.regs.hl.get());
+    const n: u8 = cpu.readMem(cpu.regs.hl.get(),false);
     cpu.regs.hl.Inc();
     cpu.regs.af.a.set(n);
     
@@ -1124,9 +1119,9 @@ fn PUSH_R16(cpu: *SM83, Src : Op, _ : Op) void
 
 fn POP_AF(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    cpu.regs.af.setFlagByte(cpu.readMem(cpu.regs.sp.get()) & 0xF0);
+    cpu.regs.af.setFlagByte(cpu.readMem(cpu.regs.sp.get(),false) & 0xF0);
     cpu.regs.sp.Inc();
-    cpu.regs.af.a.set(cpu.readMem(cpu.regs.sp.get()));
+    cpu.regs.af.a.set(cpu.readMem(cpu.regs.sp.get(),false));
     cpu.regs.sp.Inc();
     
     
@@ -1134,9 +1129,9 @@ fn POP_AF(cpu: *SM83, _ : Op, _ : Op) void
 
 fn POP_R16(cpu: *SM83, Dest : Op, _ : Op)void 
 {
-    Dest.r16.lo.set(cpu.readMem(cpu.regs.sp.get()));
+    Dest.r16.lo.set(cpu.readMem(cpu.regs.sp.get(),false));
     cpu.regs.sp.Inc();
-    Dest.r16.hi.set(cpu.readMem(cpu.regs.sp.get()));
+    Dest.r16.hi.set(cpu.readMem(cpu.regs.sp.get(),false));
     cpu.regs.sp.Inc();
 
     
@@ -1145,7 +1140,7 @@ fn POP_R16(cpu: *SM83, Dest : Op, _ : Op)void
 
 fn LD_HL_SP_E(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const e :i8 = @bitCast(cpu.readMem(cpu.regs.pc));
+    const e :i8 = @bitCast(cpu.readMem(cpu.regs.pc,true));
     const sp : u16 = cpu.regs.sp.get();
 
     const NewE: u16 = if(e<0) @as(u16,@bitCast(@as(i16,e))) else @as(u16,@as(u8,@bitCast(e)));
@@ -1187,7 +1182,7 @@ fn ADD_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn ADD_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
 
     const FullResult = @addWithOverflow(cpu.regs.af.a.get(), n);
     const HalfResult = @addWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(n)));
@@ -1205,7 +1200,7 @@ fn ADD_HL(cpu: *SM83, _ : Op, _ : Op) void
 
 fn ADD_u8(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.pc);
+    const n : u8 = cpu.readMem(cpu.regs.pc,true);
 
     const FullResult = @addWithOverflow(cpu.regs.af.a.get(), n);
     const HalfResult = @addWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(n)));
@@ -1240,7 +1235,7 @@ fn ADC_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn ADC_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
 
     const FullResult = @addWithOverflow(cpu.regs.af.a.get(), n);
     const HalfResult = @addWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(n)));
@@ -1260,7 +1255,7 @@ fn ADC_HL(cpu: *SM83, _ : Op, _ : Op) void
 
 fn ADC_u8(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.pc);
+    const n : u8 = cpu.readMem(cpu.regs.pc,true);
 
     const FullResult = @addWithOverflow(cpu.regs.af.a.get(), n);
     const HalfResult = @addWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(n)));
@@ -1295,7 +1290,7 @@ fn SUB_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn SUB_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {   
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
 
     const FullResult = @subWithOverflow(cpu.regs.af.a.get(), n);
     const HalfResult = @subWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(n)));
@@ -1313,7 +1308,7 @@ fn SUB_HL(cpu: *SM83, _ : Op, _ : Op) void
 
 fn SUB_u8(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.pc);
+    const n : u8 = cpu.readMem(cpu.regs.pc,true);
 
     const FullResult = @subWithOverflow(cpu.regs.af.a.get(), n);
     const HalfResult = @subWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(n)));
@@ -1350,7 +1345,7 @@ fn SBC_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn SBC_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
     const FullResult = @subWithOverflow(cpu.regs.af.a.get(), n);
     const HalfResult = @subWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(n)));
 
@@ -1369,7 +1364,7 @@ fn SBC_HL(cpu: *SM83, _ : Op, _ : Op) void
 
 fn SBC_u8(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.pc);
+    const n : u8 = cpu.readMem(cpu.regs.pc,true);
     const FullResult = @subWithOverflow(cpu.regs.af.a.get(), n);
     const HalfResult = @subWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(n)));
 
@@ -1402,7 +1397,7 @@ fn CP_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn CP_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
     const FullResult = @subWithOverflow(cpu.regs.af.a.get(), n);
     const HalfResult = @subWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(n)));
 
@@ -1417,7 +1412,7 @@ fn CP_HL(cpu: *SM83, _ : Op, _ : Op) void
 
 fn CP_u8(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.pc);
+    const n : u8 = cpu.readMem(cpu.regs.pc,true);
     const FullResult = @subWithOverflow(cpu.regs.af.a.get(), n);
     const HalfResult = @subWithOverflow(@as(u4,@truncate(cpu.regs.af.a.get())), @as(u4,@truncate(n)));
 
@@ -1445,7 +1440,7 @@ fn INC_R8(cpu: *SM83, Reg : Op, _ : Op) void
 
 fn INC_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
 
     const result : u8 = n +% 1;
     const HalfCarry = @addWithOverflow(@as(u4,@truncate(n)), @as(u4,1));
@@ -1473,7 +1468,7 @@ fn DEC_R8(cpu: *SM83, Reg : Op, _ : Op) void
 
 fn DEC_HL(cpu: *SM83, _ : Op, _ : Op) void
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
 
     const result : u8 = n -% 1;
     const HalfCarry = @subWithOverflow(@as(u4,@truncate(n)), @as(u4,1));
@@ -1502,7 +1497,7 @@ fn AND_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn AND_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
     const result = cpu.regs.af.a.get() & n;
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
@@ -1517,7 +1512,7 @@ fn AND_HL(cpu: *SM83, _ : Op, _ : Op) void
 
 fn AND_u8(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.pc);
+    const n : u8 = cpu.readMem(cpu.regs.pc,true);
     const result = cpu.regs.af.a.get() & n;
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
@@ -1546,7 +1541,7 @@ fn OR_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn OR_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
     const result = cpu.regs.af.a.get() | n;
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
@@ -1561,7 +1556,7 @@ fn OR_HL(cpu: *SM83, _ : Op, _ : Op) void
 
 fn OR_u8(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.pc);
+    const n : u8 = cpu.readMem(cpu.regs.pc,true);
     const result = cpu.regs.af.a.get() | n;
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
@@ -1590,7 +1585,7 @@ fn XOR_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn XOR_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
     const result = cpu.regs.af.a.get() ^ n;
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
@@ -1605,7 +1600,7 @@ fn XOR_HL(cpu: *SM83, _ : Op, _ : Op) void
 
 fn XOR_u8(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.pc);
+    const n : u8 = cpu.readMem(cpu.regs.pc,true);
     const result = cpu.regs.af.a.get() ^ n;
 
     cpu.regs.SetStatusFlag(StatusFlag.Z, result == 0);
@@ -1714,7 +1709,7 @@ fn ADD_HL_R16(cpu: *SM83, Reg16 : Op, _ : Op) void
 
 fn ADD_SP_E(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const e :i8 = @bitCast(cpu.readMem(cpu.regs.pc));
+    const e :i8 = @bitCast(cpu.readMem(cpu.regs.pc,true));
     const sp : u16 = cpu.regs.sp.get();
 
     const NewE: u16 = if(e<0) @as(u16,@bitCast(@as(i16,e))) else @as(u16,@as(u8,@bitCast(e)));
@@ -1772,7 +1767,7 @@ fn RR_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn RR_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
 
     const b0 = n & 1;
     const RotateRight: u8 = (@as(u8,@intFromBool(cpu.regs.CheckStatusFlag(StatusFlag.C))) << 7) | (n >> 1);
@@ -1820,7 +1815,7 @@ fn RRC_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn RRC_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
 
     const b0 = n & 1;
     const RotateRight: u8 = (b0 << 7) | (n >> 1);
@@ -1867,7 +1862,7 @@ fn RL_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn RL_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {   
-    const n = cpu.readMem(cpu.regs.hl.get());
+    const n = cpu.readMem(cpu.regs.hl.get(),false);
     const b7 = (n & 0x80) >> 7;
     const RotateLeft: u8 = (n << 1) | @as(u8,@intFromBool(cpu.regs.CheckStatusFlag(StatusFlag.C)));
 
@@ -1913,7 +1908,7 @@ fn RLC_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn RLC_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n = cpu.readMem(cpu.regs.hl.get());
+    const n = cpu.readMem(cpu.regs.hl.get(),false);
     const b7 = (n & 0x80) >> 7;
     const RotateLeft: u8 = (n << 1) | b7;
 
@@ -1945,7 +1940,7 @@ fn SLA_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn SLA_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n = cpu.readMem(cpu.regs.hl.get());
+    const n = cpu.readMem(cpu.regs.hl.get(),false);
     const b7 = (n & 0x80) >> 7;
     const RotateLeft: u8 = n << 1;
 
@@ -1978,7 +1973,7 @@ fn SRA_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn SRA_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
 
     const b7 = (n & 0x80) >> 7;
     const b0 = n & 1;
@@ -2011,7 +2006,7 @@ fn SRL_R8(cpu: *SM83, Src: Op, _ : Op) void
 
 fn SRL_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
 
     const b0 = n & 1;
     const RotateRight: u8 = n >> 1;
@@ -2042,7 +2037,7 @@ fn SWAP_R8(cpu: *SM83, Src : Op, _ : Op) void
 
 fn SWAP_HL(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
 
     const swap = ((n&0xF) << 4) | ((n&0xF0) >> 4);
 
@@ -2065,7 +2060,7 @@ fn BIT_B_R8(cpu: *SM83, Src : Op, bit : Op) void
 
 fn BIT_B_HL(cpu: *SM83, bit : Op, _ : Op) void 
 {
-    const n : u8 = cpu.readMem(cpu.regs.hl.get());
+    const n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
     cpu.regs.SetStatusFlag(StatusFlag.Z, (n >> (@as(u3,@truncate(bit.bit))))&1 == 0);
     cpu.regs.SetStatusFlag(StatusFlag.N, false);
     cpu.regs.SetStatusFlag(StatusFlag.H, true);
@@ -2082,7 +2077,7 @@ fn RES_B_R8(_: *SM83, Src : Op, bit : Op) void
 
 fn RES_B_HL(cpu: *SM83, bit : Op, _ : Op) void 
 {
-    var n : u8 = cpu.readMem(cpu.regs.hl.get());
+    var n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
     n &= ~(@as(u8,1) << @truncate(bit.bit));
     cpu.writeMem(cpu.regs.hl.get(), n);
 
@@ -2097,7 +2092,7 @@ fn SET_B_R8(_: *SM83, Src : Op, bit : Op) void
 
 fn SET_B_HL(cpu: *SM83, bit : Op, _ : Op) void 
 {
-    var n : u8 = cpu.readMem(cpu.regs.hl.get());
+    var n : u8 = cpu.readMem(cpu.regs.hl.get(),false);
     n |= (@as(u8,1) << @truncate(bit.bit));
     cpu.writeMem(cpu.regs.hl.get(), n);
 
@@ -2139,7 +2134,7 @@ fn JP_CC_u16(cpu: *SM83, CC : Op, _ : Op) void
 
 fn JR_E(cpu: *SM83, _ : Op, _ : Op) void 
 {   
-    const e:u16  = @bitCast(@as(i16,@intCast(@as(i8,@bitCast(cpu.readMem(cpu.regs.pc))))));
+    const e:u16  = @bitCast(@as(i16,@intCast(@as(i8,@bitCast(cpu.readMem(cpu.regs.pc,true))))));
 
     cpu.regs.pc +%=  e;
 
@@ -2151,7 +2146,7 @@ fn JR_E(cpu: *SM83, _ : Op, _ : Op) void
 
 fn JR_CC_E(cpu: *SM83, CC : Op, _ : Op) void 
 {
-    const e:u16  = @bitCast(@as(i16,@intCast(@as(i8,@bitCast(cpu.readMem(cpu.regs.pc))))));
+    const e:u16  = @bitCast(@as(i16,@intCast(@as(i8,@bitCast(cpu.readMem(cpu.regs.pc,true))))));
 
     if(cpu.regs.CheckStatusFlag(CC.flag.type) == CC.flag.state)
     {
@@ -2199,9 +2194,9 @@ fn CALL_CC_u16(cpu: *SM83, CC : Op, _ : Op) void
 
 fn RET(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const lsb: u8 = cpu.readMem(cpu.regs.sp.get());
+    const lsb: u8 = cpu.readMem(cpu.regs.sp.get(),false);
     cpu.regs.sp.Inc();
-    const msb: u8 = cpu.readMem(cpu.regs.sp.get());
+    const msb: u8 = cpu.readMem(cpu.regs.sp.get(),false);
     cpu.regs.sp.Inc();
 
     cpu.regs.pc = buildAddress(lsb, msb);
@@ -2214,9 +2209,9 @@ fn RET_CC(cpu: *SM83, CC : Op, _ : Op) void
 {
     if(cpu.regs.CheckStatusFlag(CC.flag.type) == CC.flag.state)
     {
-        const lsb: u8 = cpu.readMem(cpu.regs.sp.get());
+        const lsb: u8 = cpu.readMem(cpu.regs.sp.get(),false);
         cpu.regs.sp.Inc();
-        const msb: u8 = cpu.readMem(cpu.regs.sp.get());
+        const msb: u8 = cpu.readMem(cpu.regs.sp.get(),false);
         cpu.regs.sp.Inc();
 
         cpu.regs.pc = buildAddress(lsb, msb);
@@ -2229,9 +2224,9 @@ fn RET_CC(cpu: *SM83, CC : Op, _ : Op) void
 
 fn RETI(cpu: *SM83, _ : Op, _ : Op) void 
 {
-    const lsb: u8 = cpu.readMem(cpu.regs.sp.get());
+    const lsb: u8 = cpu.readMem(cpu.regs.sp.get(),false);
     cpu.regs.sp.Inc();
-    const msb: u8 = cpu.readMem(cpu.regs.sp.get());
+    const msb: u8 = cpu.readMem(cpu.regs.sp.get(),false);
     cpu.regs.sp.Inc();
 
     cpu.regs.pc = buildAddress(lsb, msb);
@@ -2301,7 +2296,7 @@ fn STOP(cpu: *SM83, _ : Op, _ : Op) void
         }else{
 
             // discard byte halted is true
-            _ = cpu.readMem(cpu.regs.pc);
+            _ = cpu.readMem(cpu.regs.pc,true);
             cpu.isHalted = true;
             cpu.dmaWasActive = cpu.Emu.dma.VRAMTransferInProgress; 
             cpu.Emu.dma.VRAMTransferInProgress = false;
@@ -2309,7 +2304,7 @@ fn STOP(cpu: *SM83, _ : Op, _ : Op) void
     // Nope, Check If speed was armed
     }else if(!cpu.Emu.DoubleSpeed.Armed){
 
-        // If speed change was armed, see if an int is pending
+        // If speed change was not armed, see if an int is pending
         if((cpu.regs.IF.get() & cpu.regs.IE.get())&0x1F != 0){
             
             // if so stop mode is entered and div reset
@@ -2318,7 +2313,7 @@ fn STOP(cpu: *SM83, _ : Op, _ : Op) void
 
             // If not we descard a byte, enter stop mode, div reset
         }else{
-            _ = cpu.readMem(cpu.regs.pc); // TODO: Maybe just inc PC
+            _ = cpu.readMem(cpu.regs.pc,true); // TODO: Maybe just inc PC
             cpu.isStopped = true;
             cpu.Emu.timer.DIV.set(0);
         }
@@ -2328,7 +2323,7 @@ fn STOP(cpu: *SM83, _ : Op, _ : Op) void
         // if no interrupt pending
 
         // byte discarded
-        _ = cpu.readMem(cpu.regs.pc);
+        _ = cpu.readMem(cpu.regs.pc,true);
         // halt mode entered
         cpu.isHalted = true;
         cpu.dmaWasActive = cpu.Emu.dma.VRAMTransferInProgress; 

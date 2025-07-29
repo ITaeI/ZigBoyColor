@@ -2,12 +2,12 @@ const std = @import("std");
 const GBC = @import("GBC.zig").GBC;
 const Register = @import("SM83.zig").Register8Bit;
 
-const GUI = @import("GUI.zig").GUI;
+const GUI2 = @import("GUI.zig").GUI2;
 
 
 pub const PPU = struct {
 
-    LCD : *GUI,
+    LCD : *GUI2,
 
     Emu : *GBC,
     vram : VRAM,
@@ -27,9 +27,10 @@ pub const PPU = struct {
     const DotsPerFrame:u32 = 70224;
 
 
-    pub fn init (parentPtr : *GBC, lcd : *GUI) PPU{
+    pub fn init (parentPtr : *GBC, lcd : *GUI2) PPU{
 
         dots = 0;
+        windowline = 0;
 
         return PPU{
             .LCD = lcd,
@@ -168,7 +169,7 @@ pub const PPU = struct {
             var tileData : u16 = 0x9000;
             var WindowTile : bool = false;  
             // Set up what maps and tile data to look at
-            if(lcdc.WindowEnable and LY >= WY and X >= WX){
+            if(lcdc.WindowEnable and LY >= WY and X+7 >= WX+%7){
                 windowTileSeen = true;
                 WindowTile = true;
                 if(lcdc.WindowTileMap) tileMap = 0x9C00;
@@ -203,7 +204,7 @@ pub const PPU = struct {
             const BGLo: u8 = self.vram.Banks[if(self.Emu.CGBMode) BG_Attr.Bank else 0][BG_Address];
             const BGHi: u8 = self.vram.Banks[if(self.Emu.CGBMode) BG_Attr.Bank else 0][BG_Address + 1];
 
-            const BGPallete = self.pmem.grabPalette(if(self.Emu.CGBMode) BG_Attr.ColorPalette else 0, true); 
+            const BGPallete = if(self.Emu.CGBMode) self.pmem.grabGBCPalette(BG_Attr.ColorPalette, true) else self.pmem.grabGBPalette(true,0, &self.regs); 
 
             BitsPlaced = 0;
             var offset: u8 = x&7;
@@ -235,7 +236,8 @@ pub const PPU = struct {
 
         var spr:usize = 0;
         while(spr < self.spriteCount) :(spr+=1){
-
+            
+            
             const entry = self.sprites[if(self.Emu.CGBMode) self.spriteCount-1-spr else spr];
             Sprite = self.oam.Entries[entry];
 
@@ -245,7 +247,8 @@ pub const PPU = struct {
 
             const SpriteLo:u8 = self.vram.Banks[if(self.Emu.CGBMode) Sprite.Bank_No else 0][(@as(u32,(Sprite.tile))*16) + @as(u32,SpriteY) * 2];
             const SpriteHi:u8 = self.vram.Banks[if(self.Emu.CGBMode) Sprite.Bank_No else 0][(@as(u32,(Sprite.tile))*16) + @as(u32,SpriteY) * 2 + 1]; 
-            const OBJPalette = self.pmem.grabPalette(if(self.Emu.CGBMode) Sprite.CGB_Palette else @as(u3,Sprite.Palette), false);
+            
+            const OBJPalette =  if(self.Emu.CGBMode) self.pmem.grabGBCPalette(Sprite.CGB_Palette, false) else self.pmem.grabGBPalette(false, Sprite.Palette, &self.regs);
         
             for(0..8) |offset|{
                 
@@ -477,21 +480,9 @@ pub const PPU = struct {
                 self.regs.dma.set(data);
                 self.Emu.dma.StartOAMTransfer(data);
             },
-            0xFF47 => {
-                self.regs.bgp.set(data);
-                if(self.Emu.CGBMode) return;
-                self.pmem.updateDMGPalette(data,1);
-            },
-            0xFF48 => {
-                self.regs.obp0.set(data);
-                if(self.Emu.CGBMode) return;
-                self.pmem.updateDMGPalette(data,2);
-            },
-            0xFF49 => {
-                self.regs.obp1.set(data);
-                if(self.Emu.CGBMode) return;
-                self.pmem.updateDMGPalette(data,3);
-            },
+            0xFF47 => self.regs.bgp.set(data),
+            0xFF48 => self.regs.obp0.set(data),
+            0xFF49 => self.regs.obp1.set(data),
             0xFF4A => self.regs.wy.set(data),
             0xFF4B => self.regs.wx.set(data),
             0xFF68 => self.pmem.BCPS = @bitCast(data), 
@@ -628,12 +619,61 @@ const PaletteMemory = struct {
     BCPS : AddressFormat = @bitCast(@as(u8,0x00)),
     OCPS : AddressFormat = @bitCast(@as(u8,0x00)),
 
-    const DMGPallete : [8]u8 = .{
-        0xFF, 0xFF,
-        0xB5, 0x56,
-        0x4A, 0x29,
-        0x00, 0x00,
+    /// User Palette Choice
+    GBPaletteIndex : usize = 0,
+    const GBPalettes: [7][4]u16 = .{
+        // DMG Grayscale
+        .{
+            0xFFFF,
+            0x56B5,
+            0x294A,
+            0x0000,
+        },
+        // Green
+        .{
+            0x86F3,
+            0x86B1,
+            0x9986,
+            0x84E1,
+        },
+        // Sepia
+        .{
+            0xC31C,
+            0x9DD6,
+            0x8CEC,
+            0x8465,
+        },
+        // Blue
+        .{
+            0xFF56,
+            0xF311,
+            0xC1A6,
+            0x9861,
+        },
+        // Red
+        .{
+            0xEB5F,
+            0xB9D8,
+            0x98CD,
+            0x8424,
+        },
+        // Orange
+        .{
+            0xEB9F,
+            0xBA98,
+            0x994D,
+            0x8464,
+        },
+        // Purple
+        .{
+            0xFF5C,
+            0xE1D4,
+            0xB4CA,
+            0x9023,
+        },
     };
+
+
 
 
     pub fn readOBJ(self : *PaletteMemory,mode:PPUmodes)u8 {
@@ -655,8 +695,7 @@ const PaletteMemory = struct {
         if(self.BCPS.autoInc) self.BCPS.Address +%= 1;
     }
 
-    pub fn grabPalette(self : *PaletteMemory, ID : u3, BG : bool)[4]u16{
-
+    pub fn grabGBCPalette(self : *PaletteMemory, ID : u3, BG : bool)[4]u16{
         const Index : usize = (@as(u6,ID) * 8);
 
         var Out : [4]u16 = undefined;
@@ -668,46 +707,28 @@ const PaletteMemory = struct {
         return Out;
     }
 
-    /// input goes BGP OBJ0 OBJ1
-    pub fn updateDMGPalette(self : *PaletteMemory, dmgPalette:u8, i : u2) void{
-    
-        
-        const dmgArray: [4]u2 = .{ 
-            @truncate(dmgPalette), 
-            @truncate(dmgPalette >> 2), 
-            @truncate(dmgPalette >> 4),
-            @truncate(dmgPalette >> 6)
+    pub fn grabGBPalette(self : *PaletteMemory, BG :bool,SpritePalette : u1, regs : *Registers)[4]u16{
+
+        const Out : [4]u16 = Calc : {
+            if(BG) break :Calc self.ConvertGBPalette(regs.bgp.get());
+            if(SpritePalette == 0) break :Calc self.ConvertGBPalette(regs.obp0.get());
+            break :Calc self.ConvertGBPalette(regs.obp0.get());
         };
+        
+        return Out;
+    }
 
-        switch (i) {
-            1 => {
-                for(0..4) |ID|{
-                    const IDcolorOffset = @as(u8,dmgArray[ID])*2;
-                    const pOffset:u8 = @intCast(ID*2);
-                    self.BGPRAM[pOffset] = DMGPallete[IDcolorOffset];
-                    self.BGPRAM[pOffset+1] = DMGPallete[IDcolorOffset+1];
-                }
-                
-            },
-            2 =>{
-                for(0..4) |ID|{
-                    const IDcolorOffset = @as(u8,dmgArray[ID])*2;
-                    const pOffset:u8 = @intCast(ID*2);
-                    self.OBJPRAM[pOffset] = DMGPallete[IDcolorOffset];
-                    self.OBJPRAM[pOffset+1] = DMGPallete[IDcolorOffset+1];
-                }
-            },
-            3 =>{
+    fn ConvertGBPalette(self: *PaletteMemory, Palette:u8)[4]u16{
+        var Out : [4]u16 = undefined;
+        Out[0] = GBPalettes[self.GBPaletteIndex][Palette&3];
+        Out[1] = GBPalettes[self.GBPaletteIndex][(Palette>>2)&3];
+        Out[2] = GBPalettes[self.GBPaletteIndex][(Palette>>4)&3];
+        Out[3] = GBPalettes[self.GBPaletteIndex][(Palette>>6)&3];
+        return Out;
+    }
 
-                for(0..4) |ID|{
-                    const IDcolorOffset = @as(u8,dmgArray[ID])*2;
-                    const pOffset:u8 = @intCast(ID*2);
-                    self.OBJPRAM[pOffset+8] = DMGPallete[IDcolorOffset];
-                    self.OBJPRAM[pOffset+9] = DMGPallete[IDcolorOffset+1];
-                }
-            },
-            else => unreachable,
-        }
+    pub fn SelectUserPalette(self : *PaletteMemory, index: usize)void{
+        self.GBPaletteIndex = index;
     }
 
 

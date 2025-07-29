@@ -32,8 +32,6 @@ pub const Cartridge = struct {
 
         // defer closing file
         defer file.close();
-        // also close if an error is thrown
-        errdefer file.close();
 
         // Load rom data into struct slice
         const stat = try file.stat();
@@ -45,7 +43,7 @@ pub const Cartridge = struct {
 
         // set our memory bank controller
 
-        //std.debug.print("Cart Type : {x}", .{self.header.cart_type});
+        std.debug.print("Cart Type : {x}", .{self.header.cart_type});
         self.mbc = switch (self.header.cart_type) {
             0 => MBC{.Rom = ROM{.Header = self.header,.Data = &self.romData}},
             0x1 => MBC{.MBC1 = MBC1{.Header = self.header,.Data = &self.romData,}},
@@ -86,7 +84,8 @@ pub const Cartridge = struct {
 
         self.save(self.filePath);
         // Free the rom data
-        self.alloc.free(self.romData);
+        
+        if (self.romData.len > 0) self.alloc.free(self.romData);
     }
 
     // Tagged Union Wrappers (Easier than having them in union)
@@ -252,7 +251,6 @@ const MBC1 = struct {
                 else {
                     break :blk self.RAM[address - 0xA000];
                 }
-
             },
             else => 0xFF,
         };
@@ -262,7 +260,11 @@ const MBC1 = struct {
         switch (address) {
             0...0x1FFF => self.ramEnabled = ((data & 0xF) == 0xA),
             0x2000...0x3FFF => {
-                if(data == 0x00) self.currentRomBank = 1;
+                if(data == 0x00){
+                    self.currentRomBank = 1; 
+                    return;
+                }
+
                 self.currentRomBank = switch (self.Header.rom_size) {
                     0 => 1,
                     1 => data & 0x3,
@@ -604,7 +606,6 @@ fn saveFile(filePath: []const u8, ramSlice : []u8, extension: []const u8) !void{
     }; 
 
     defer file.close();
-    errdefer file.close();
 
     try file.seekTo(0);
     _ = try file.writeAll(ramSlice);
@@ -622,7 +623,6 @@ fn reloadsaveFile(filePath: []const u8, ramSlice : []u8, extension : []const u8)
     var file = try std.fs.cwd().openFile(saveFilePath, .{ .mode = .read_write });
 
     defer file.close();
-    errdefer file.close();
 
     try file.seekTo(0);
     _ = try file.readAll(ramSlice);

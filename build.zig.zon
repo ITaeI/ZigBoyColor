@@ -40,11 +40,16 @@
             .url = "git+https://github.com/Not-Nik/raylib-zig?ref=devel#5013830647196ba938a3a25a36b8245606e9a9cd",
             .hash = "raylib_zig-5.6.0-dev-KE8REM0tBQAHVn9Xjqlgu9l1qgfTmP8aJa1kLhD584bV",
         },
+        .zclay = .{
+            .url = "git+https://github.com/johan0A/clay-zig-bindings?ref=v0.2.1+0.14#37110b6e0ed3de44fb7e9f9c2744a1837d8b84cc",
+            .hash = "zclay-0.2.0-Ej1rkNXJAAAI8utSJxUNPY5EybD7bjgbcx7pPjN_atKC",
+        },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
+        "renderer",
         // For example...
         //"LICENSE",
         //"README.md",
